@@ -1,3 +1,6 @@
+## 1.1.0
+- Add more verbose diagnostics in `lumide doctor` command. Use `lumide doctor --verbose`.
+
 ## 1.0.0+1
 
 - **Initial Stable Release!**

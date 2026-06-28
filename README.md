@@ -32,6 +32,12 @@ lumide .
 # Check your environment
 lumide doctor
 
+# Show the environment and executable resolution used for plugin startup
+lumide doctor --verbose
+
+# Reproduce plugin dependency startup with Lumide's process configuration
+lumide doctor --verbose --dart-path <configured-dart> --plugin-path <plugin-dir>
+
 # Just install/update
 lumide install
 
@@ -53,6 +59,15 @@ lumide install --silent
 - `-s, --silent`: Skip the terminal UI for automated installs.
 - `--install-dir`: Specify a custom installation location.
 - `--force`: Force a fresh installation over an existing one.
+
+### Plugin startup diagnostics
+
+`lumide doctor --verbose` resolves bare `dart` using the same environment and
+Windows executable-extension order as Lumide. Pass `--dart-path` to compare a
+custom Dart SDK setting. Pass `--plugin-path` to run the exact `dart pub get`
+process used when starting a local plugin, including its working directory.
+Verbose output summarizes PATH and shows only Dart/Flutter entries; add
+`--show-path` when the complete PATH is needed.
 
 ---
 
