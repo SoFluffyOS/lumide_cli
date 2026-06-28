@@ -4,4 +4,4 @@ library;
 const String kDefaultGithubRepo = 'SoFluffyOS/lumide';
 const String kLumideAppBundleName = 'Lumide.app';
 const String kGithubApiBaseUrl = 'https://api.github.com';
-const String kLumideCliVersion = '1.0.0';
+const String kLumideCliVersion = '1.1.0';
