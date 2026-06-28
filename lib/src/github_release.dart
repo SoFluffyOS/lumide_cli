@@ -12,11 +12,10 @@ class GithubRelease {
     return GithubRelease(
       tagName: json['tag_name'] as String? ?? 'unknown',
       assets: switch (rawAssets) {
-        final List<dynamic> assets =>
-          assets
-              .whereType<Map<String, Object?>>()
-              .map(GithubReleaseAsset.fromJson)
-              .toList(),
+        final List<dynamic> assets => assets
+            .whereType<Map<String, Object?>>()
+            .map(GithubReleaseAsset.fromJson)
+            .toList(),
         _ => const [],
       },
     );

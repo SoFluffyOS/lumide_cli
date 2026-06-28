@@ -88,15 +88,15 @@ class InstallCommand extends Command<int> {
           initialPrompt: prompt ? _PromptMode.confirmInstall : _PromptMode.none,
           installTask: (onProgress, onStatus, askConfirmation) =>
               _performInstall(
-                installDirectory: installDirectory,
-                repo: repo,
-                force: force,
-                assetUrl: assetUrl,
-                onProgress: onProgress,
-                onStatus: onStatus,
-                askConfirmation: askConfirmation,
-                passthroughArguments: passthroughArgs,
-              ),
+            installDirectory: installDirectory,
+            repo: repo,
+            force: force,
+            assetUrl: assetUrl,
+            onProgress: onProgress,
+            onStatus: onStatus,
+            askConfirmation: askConfirmation,
+            passthroughArguments: passthroughArgs,
+          ),
           onDone: (exitCode) => completer.complete(exitCode),
         ),
       ),
@@ -336,8 +336,7 @@ class _InstallTui extends StatefulComponent {
     void Function(double) onProgress,
     void Function(String) onStatus,
     Future<bool> Function(_PromptMode) askConfirmation,
-  )
-  installTask;
+  ) installTask;
   final void Function(int) onDone;
 
   const _InstallTui({

@@ -13,15 +13,14 @@ import 'package:lumide/src/constants.dart';
 import 'package:lumide/src/pub_client.dart';
 
 Future<int> runLumide(List<String> arguments) async {
-  final runner =
-      CommandRunner<int>(
-          'lumide',
-          'Standalone CLI for installing and launching Lumide.',
-        )
-        ..addCommand(InstallCommand())
-        ..addCommand(LaunchCommand())
-        ..addCommand(DoctorCommand())
-        ..addCommand(FoxCommand());
+  final runner = CommandRunner<int>(
+    'lumide',
+    'Standalone CLI for installing and launching Lumide.',
+  )
+    ..addCommand(InstallCommand())
+    ..addCommand(LaunchCommand())
+    ..addCommand(DoctorCommand())
+    ..addCommand(FoxCommand());
 
   // Background update check
   final updateCheck = _checkUpdateInBackground();

@@ -44,10 +44,13 @@ class AppInstaller {
         await destinationDirectory.delete(recursive: true);
       }
 
-      await runCheckedProcess('ditto', [
-        appBundlePath,
-        destination,
-      ], failureMessage: 'Failed to copy Lumide into $installDirectory.');
+      await runCheckedProcess(
+          'ditto',
+          [
+            appBundlePath,
+            destination,
+          ],
+          failureMessage: 'Failed to copy Lumide into $installDirectory.');
 
       return destination;
     } finally {
