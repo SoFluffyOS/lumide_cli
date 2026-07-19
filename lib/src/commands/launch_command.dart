@@ -33,6 +33,7 @@ class LaunchCommand extends Command<int> {
     final arguments = <String>[];
 
     if (Platform.isMacOS) {
+      arguments.add('-n');
       if (passthroughArguments.isNotEmpty) {
         final absoluteArgs = _resolveAbsoluteArgs(passthroughArguments);
         arguments.addAll([appPath, '--args', ...absoluteArgs]);
