@@ -1,6 +1,6 @@
 name: lumide
 description: A delightful cross-platform CLI for installing, managing, and launching the Lumide IDE.
-version: 1.1.0+1
+version: 1.1.1
 homepage: https://lumide.dev
 repository: https://github.com/SoFluffyOS/lumide_cli
 

@@ -1,3 +1,6 @@
+## 1.1.1
+- Add `-n` arg for macOS to open as new process.
+
 ## 1.1.0+1
 - Add more verbose diagnostics in `lumide doctor` command. Use `lumide doctor --verbose`.
 
