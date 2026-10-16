@@ -13,11 +13,30 @@ import 'package:lumide/src/commands/launch_command.dart';
 import 'package:lumide/src/constants.dart';
 import 'package:lumide/src/pub_client.dart';
 
+class _LumideCommandRunner extends CommandRunner<int> {
+  _LumideCommandRunner()
+      : super(
+          'lumide',
+          'Standalone CLI for installing and launching Lumide.',
+        );
+
+  @override
+  String get invocation =>
+      'lumide [--add] [<file or folder>...]\n       lumide <command> [arguments]';
+
+  @override
+  String get usageFooter => '''
+
+Without a command, lumide launches Lumide with the files and folders given:
+  lumide .                       Open the current folder.
+  lumide app api web             Open one window with app as the first folder
+                                 and api and web added to it.
+  lumide --add api web           Add api and web to the window you used last.
+  lumide team.lumide-workspace   Open a workspace file.''';
+}
+
 Future<int> runLumide(List<String> arguments) async {
-  final runner = CommandRunner<int>(
-    'lumide',
-    'Standalone CLI for installing and launching Lumide.',
-  )
+  final runner = _LumideCommandRunner()
     ..addCommand(InstallCommand())
     ..addCommand(LaunchCommand())
     ..addCommand(DoctorCommand())
@@ -45,8 +64,9 @@ Future<int> runLumide(List<String> arguments) async {
   // Redirect to install if Lumide is missing during a launch attempt
   if (effectiveArguments.isNotEmpty && effectiveArguments.first == 'launch') {
     if (!isLumideApp(defaultLumideAppPath())) {
-      final remainingArgs = effectiveArguments.skip(1).toList();
-      effectiveArguments = ['install', '--prompt', ...remainingArgs];
+      effectiveArguments = installThenLaunchArguments(
+        effectiveArguments.skip(1).toList(),
+      );
     }
   }
 
@@ -85,6 +105,24 @@ Future<int> runLumide(List<String> arguments) async {
     stderr.writeln(error);
     return 1;
   }
+}
+
+/// The `install` arguments that install Lumide, then launch it with the
+/// `launch` arguments [launchArguments]. Install passes on what follows
+/// `--`, so that launch options such as `--add` reach Lumide.
+List<String> installThenLaunchArguments(List<String> launchArguments) {
+  final add = launchArguments.contains(addFlag);
+  final paths = [
+    for (final argument in launchArguments)
+      if (argument != addFlag && argument != '--') argument,
+  ];
+  return [
+    'install',
+    '--prompt',
+    if (add || paths.isNotEmpty) '--',
+    if (add) addFlag,
+    ...paths,
+  ];
 }
 
 Future<String?> _checkUpdateInBackground() async {

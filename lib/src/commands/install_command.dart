@@ -9,6 +9,7 @@ import 'package:args/command_runner.dart';
 import 'package:lumide/src/app_installer.dart';
 import 'package:lumide/src/app_version.dart';
 import 'package:lumide/src/background_tasks.dart';
+import 'package:lumide/src/commands/launch_command.dart';
 import 'package:lumide/src/constants.dart';
 import 'package:lumide/src/github_release_client.dart';
 import 'package:lumide/src/install_location_config.dart';
@@ -394,7 +395,7 @@ class InstallCommand extends Command<int> {
 
     if (Platform.isMacOS) {
       if (passthroughArguments.isNotEmpty) {
-        final absoluteArgs = _resolveAbsoluteArgs(passthroughArguments);
+        final absoluteArgs = resolveAbsoluteArgs(passthroughArguments);
         arguments.addAll([appPath, '--args', ...absoluteArgs]);
       } else {
         arguments.add(appPath);
@@ -402,7 +403,7 @@ class InstallCommand extends Command<int> {
       await Process.start('open', arguments, mode: ProcessStartMode.detached);
     } else if (Platform.isWindows) {
       if (passthroughArguments.isNotEmpty) {
-        final absoluteArgs = _resolveAbsoluteArgs(passthroughArguments);
+        final absoluteArgs = resolveAbsoluteArgs(passthroughArguments);
         arguments.addAll(absoluteArgs);
       }
       await Process.start(
@@ -414,29 +415,11 @@ class InstallCommand extends Command<int> {
     } else {
       // Linux
       if (passthroughArguments.isNotEmpty) {
-        final absoluteArgs = _resolveAbsoluteArgs(passthroughArguments);
+        final absoluteArgs = resolveAbsoluteArgs(passthroughArguments);
         arguments.addAll(absoluteArgs);
       }
       await Process.start(appPath, arguments, mode: ProcessStartMode.detached);
     }
-  }
-
-  List<String> _resolveAbsoluteArgs(List<String> args) {
-    return args.map((arg) {
-      if (arg.startsWith('-')) return arg;
-      try {
-        final absolutePath = File(arg).absolute.path;
-        final type = FileSystemEntity.typeSync(absolutePath);
-        if (type != FileSystemEntityType.notFound) {
-          return type == FileSystemEntityType.file
-              ? File(absolutePath).resolveSymbolicLinksSync()
-              : Directory(absolutePath).resolveSymbolicLinksSync();
-        }
-        return absolutePath;
-      } catch (_) {
-        return arg;
-      }
-    }).toList();
   }
 
   Future<({Uri uri, String tag})> _resolveLatestReleaseAsset(

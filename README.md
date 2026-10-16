@@ -29,6 +29,15 @@ dart pub global activate lumide
 # Launch Lumide in the current directory (installs if missing!)
 lumide .
 
+# Open several folders in one window: app first, api and web added to it
+lumide app api web
+
+# Add folders to the Lumide window you used last
+lumide --add api web
+
+# Open a workspace file
+lumide team.lumide-workspace
+
 # Check your environment
 lumide doctor
 
@@ -49,13 +58,15 @@ lumide install --silent
 
 | Command | Description |
 |---------|-------------|
-| `lumide launch <path>` | Open a directory or file in Lumide (default command). |
+| `lumide launch <path>...` | Open files and folders in Lumide (default command). Several folders open in one window, the first as its main folder. |
+| `lumide --add <folder>...` | Add folders to the Lumide window you used last, or open them in a new window when none runs. |
 | `lumide install` | Download and set up the latest Lumide release. |
 | `lumide doctor` | Verify installation status and system SDKs. |
 | `lumide help` | Show available commands and options. |
 
 ## Options
 
+- `--add`: Add the folders to the Lumide window you used last (`lumide launch`).
 - `-s, --silent`: Skip the terminal UI for automated installs. An existing
   installation is only replaced together with `--force`; otherwise the command
   stops with exit code 1.
