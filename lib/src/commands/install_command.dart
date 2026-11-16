@@ -74,15 +74,28 @@ class InstallCommand extends Command<int> {
     final passthroughArgs = argResults?.rest ?? const <String>[];
 
     if (silent) {
+      // Nobody can answer the upgrade question, so it takes --force.
+      final existingApp = force ? null : _findExistingApp(installDirectory);
+      if (existingApp != null) {
+        final action = installReplaces(installDirectory, existingApp)
+            ? 'replace it'
+            : 'install a separate copy in '
+                '${lumideInstallTarget(installDirectory)}';
+        stdout.writeln(
+          'Lumide is already installed at $existingApp. Re-run with --force '
+          'to $action.',
+        );
+        return 1;
+      }
       await _performInstall(
         installDirectory: installDirectory,
         repo: repo,
-        force: force || !prompt,
+        force: true,
         assetUrl: assetUrl,
         onProgress: (p) =>
             stdout.write('\rInstalling... ${(p * 100).toInt()}%'),
         onStatus: (s) => stdout.writeln('\n$s'),
-        askConfirmation: (_, [__]) async => true, // Auto-confirm
+        askConfirmation: (_, [__]) async => true, // e.g. launch afterwards
         passthroughArguments: passthroughArgs,
       );
       stdout.writeln();

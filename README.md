@@ -56,7 +56,9 @@ lumide install --silent
 
 ## Options
 
-- `-s, --silent`: Skip the terminal UI for automated installs.
+- `-s, --silent`: Skip the terminal UI for automated installs. An existing
+  installation is only replaced together with `--force`; otherwise the command
+  stops with exit code 1.
 - `--install-dir`: Specify a custom installation location.
 - `--force`: Force a fresh installation over an existing one.
 
