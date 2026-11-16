@@ -6,16 +6,32 @@ import 'dart:io';
 
 import 'package:lumide/src/constants.dart';
 import 'package:lumide/src/github_release.dart';
+import 'package:lumide/src/network_retry.dart';
 
 class GithubReleaseClient {
   const GithubReleaseClient();
 
-  Future<GithubRelease> fetchLatestRelease({required String repository}) async {
+  Future<GithubRelease> fetchLatestRelease({
+    required String repository,
+    void Function(int nextAttempt, int maxAttempts, Object error)? onRetry,
+    int maxAttempts = kNetworkMaxAttempts,
+  }) {
+    return retryOnNetworkError(
+      () => _fetchLatestRelease(repository),
+      onRetry: onRetry,
+      maxAttempts: maxAttempts,
+    );
+  }
+
+  Future<GithubRelease> _fetchLatestRelease(String repository) async {
     final uri = Uri.parse(
       '$kGithubApiBaseUrl/repos/$repository/releases/latest',
     );
 
-    final httpClient = HttpClient();
+    // Same connection timeout as downloads, so a stalled connection fails
+    // (and is retried) instead of hanging.
+    final httpClient = HttpClient()
+      ..connectionTimeout = kNetworkConnectionTimeout;
     try {
       final request = await httpClient.getUrl(uri);
       request.headers.set(
@@ -24,8 +40,9 @@ class GithubReleaseClient {
       );
       request.headers.set(HttpHeaders.userAgentHeader, 'lumide-cli');
 
-      final response = await request.close();
-      final responseBody = await utf8.decodeStream(response);
+      final response = await request.close().timeout(kNetworkStallTimeout);
+      final responseBody =
+          await utf8.decodeStream(response.timeout(kNetworkStallTimeout));
 
       if (response.statusCode != HttpStatus.ok) {
         throw LumideCliException(

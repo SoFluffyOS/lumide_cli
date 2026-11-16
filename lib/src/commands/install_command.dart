@@ -7,6 +7,7 @@ import 'dart:math';
 
 import 'package:args/command_runner.dart';
 import 'package:lumide/src/app_installer.dart';
+import 'package:lumide/src/background_tasks.dart';
 import 'package:lumide/src/constants.dart';
 import 'package:lumide/src/github_release_client.dart';
 import 'package:lumide/src/io_helpers.dart';
@@ -137,7 +138,7 @@ class InstallCommand extends Command<int> {
       // Map download 0-100% to total 5-85%
       final downloadResult = await _downloadAsset(downloadUri, (p) {
         onProgress(0.05 + (p * 0.80));
-      });
+      }, onStatus);
       final downloadedFile = downloadResult.file;
       tempDir = downloadResult.tempDirectory;
 
@@ -273,59 +274,52 @@ class InstallCommand extends Command<int> {
     void Function(String) onStatus,
   ) async {
     final client = const GithubReleaseClient();
-    final release = await client.fetchLatestRelease(repository: repository);
+    final release = await client.fetchLatestRelease(
+      repository: repository,
+      onRetry: _reportRetry(onStatus),
+    );
     final asset = selectInstallAsset(release.assets);
     onStatus('Using release ${release.tagName} (${asset.name})');
     return Uri.parse(asset.downloadUrl);
   }
 
+  /// Shows "connection problem, retrying" messages while a request is retried.
+  void Function(int, int, Object) _reportRetry(void Function(String) onStatus) {
+    return (nextAttempt, maxAttempts, error) => onStatus(
+          'Connection problem ($error). Retrying '
+          '($nextAttempt/$maxAttempts)...',
+        );
+  }
+
   Future<({File file, Directory tempDirectory})> _downloadAsset(
     Uri uri,
     void Function(double) onProgress,
+    void Function(String) onStatus,
   ) async {
-    final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 10);
+    final tempDirectory = await Directory.systemTemp.createTemp(
+      'lumide_install_',
+    );
+    final fileName = p.basename(uri.path.isEmpty ? 'Lumide.dmg' : uri.path);
+    final destination = File(p.join(tempDirectory.path, fileName));
 
     try {
-      final request = await client.getUrl(uri);
-      request.headers.set(HttpHeaders.userAgentHeader, 'lumide-cli');
-      final response = await request.close();
-
-      if (response.statusCode != HttpStatus.ok) {
-        throw ProcessException(
-          'download',
-          [uri.toString()],
-          'Failed to download ${uri.toString()} '
-              '(HTTP ${response.statusCode}).',
-          response.statusCode,
-        );
-      }
-
-      final contentLength = response.contentLength;
-      int downloaded = 0;
-
-      final tempDirectory = await Directory.systemTemp.createTemp(
-        'lumide_install_',
+      // Runs on a background isolate so the install screen can't slow it
+      // down. Each retry continues where the previous attempt stopped.
+      await downloadInBackground(
+        uri,
+        destination,
+        onProgress: onProgress,
+        onRetry: _reportRetry(onStatus),
       );
-      final fileName = p.basename(uri.path.isEmpty ? 'Lumide.dmg' : uri.path);
-      final destination = File(p.join(tempDirectory.path, fileName));
-
-      final sink = destination.openWrite();
-      try {
-        await for (final chunk in response) {
-          downloaded += chunk.length;
-          if (contentLength > 0) {
-            onProgress(downloaded / contentLength);
-          }
-          sink.add(chunk);
-        }
-      } finally {
-        await sink.close();
-      }
-
       return (file: destination, tempDirectory: tempDirectory);
-    } finally {
-      client.close(force: true);
+    } catch (_) {
+      // Don't leave a half-downloaded file behind.
+      try {
+        await tempDirectory.delete(recursive: true);
+      } catch (_) {
+        // Best effort cleanup.
+      }
+      rethrow;
     }
   }
 }

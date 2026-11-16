@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:lumide/src/background_tasks.dart';
 import 'package:lumide/src/constants.dart';
 import 'package:lumide/src/io_helpers.dart';
 import 'package:path/path.dart' as p;
@@ -90,7 +91,7 @@ class AppInstaller {
       await destDir.delete(recursive: true);
     }
 
-    await extractArchive(archivePath, destination);
+    await extractArchiveInBackground(archivePath, destination);
 
     if (Platform.isLinux) {
       await _integrateLinuxDesktop(destination);
