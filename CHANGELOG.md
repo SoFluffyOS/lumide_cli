@@ -1,3 +1,18 @@
+## Unreleased
+- Fix installs from the 0.25 archives landing in `Lumide/Lumide/`, so the CLI could not find the app it had just installed. Existing installs in that layout are still found.
+- Fix downloads freezing (nocterm 0.8) and running about 16x slower under the install screen on Windows (download and extraction now run on a background isolate).
+- Retry the release lookup and download on connection errors, resume interrupted downloads, and fail stalled connections instead of hanging.
+- Commands exit as soon as they are done instead of waiting for the update check.
+- `--silent` no longer replaces an existing installation unless `--force` is given.
+- Refuse archive entries that would extract outside the install folder.
+- Never replace an existing `Lumide` folder that is not a Lumide installation (it was deleted before), and refuse to install inside an installed Lumide.
+- Linux: add the app menu entry and icon from the current archive layout.
+- Add `LUMIDE_INSTALL_DIR`, and remember a custom `--install-dir` so `lumide`, `launch` and `doctor` find Lumide there. A folder that already holds Lumide can be used without reinstalling.
+- `lumide doctor` and the upgrade question show the installed and latest Lumide versions.
+- Fix the CLI reporting its own current version as an available update.
+- `lumide doctor` on Windows: check the `dart.exe` that Lumide itself would start (a bare `dart` never runs Flutter's `dart.bat`) instead of reporting a false success when the CLI runs inside `dart.exe`, and say which folder to add to PATH. The Flutter check now finds `flutter.bat`.
+- Windows: when PATH only has Flutter's `dart.bat`, Lumide started by the CLI (`lumide`, `lumide launch`, after `lumide install`) gets Flutter's Dart SDK added to its PATH, so its plugins can start `dart`.
+
 ## 1.1.1
 - Add `-n` arg for macOS to open as new process.
 
