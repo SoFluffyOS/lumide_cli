@@ -42,6 +42,73 @@ void main() {
     expect(File(p.join(out, 'ok.txt')).existsSync(), isFalse);
   });
 
+  group('wrapper folder', () {
+    Future<String> extract(Map<String, String> files) async {
+      final out = p.join(temp.path, 'out');
+      await extractArchive(await writeZip(files), out);
+      return out;
+    }
+
+    test('drops the folder that wraps everything (Lumide 0.25 layout)',
+        () async {
+      final out = await extract({
+        'Lumide/Lumide.exe': 'exe',
+        'Lumide/data/icudtl.dat': 'icu',
+      });
+      expect(File(p.join(out, 'Lumide.exe')).readAsStringSync(), 'exe');
+      expect(File(p.join(out, 'data', 'icudtl.dat')).existsSync(), isTrue);
+      expect(Directory(p.join(out, 'Lumide')).existsSync(), isFalse);
+    });
+
+    test('keeps archives without a wrapper folder as they are', () async {
+      final out = await extract({'Lumide.exe': 'exe', 'data/a.dat': 'a'});
+      expect(File(p.join(out, 'Lumide.exe')).readAsStringSync(), 'exe');
+      expect(File(p.join(out, 'data', 'a.dat')).existsSync(), isTrue);
+    });
+
+    test('ignores macOS metadata next to the wrapper folder', () async {
+      final out = await extract({
+        'Lumide/Lumide': 'bin',
+        '__MACOSX/Lumide/._Lumide': 'junk',
+      });
+      expect(File(p.join(out, 'Lumide')).readAsStringSync(), 'bin');
+      expect(Directory(p.join(out, '__MACOSX')).existsSync(), isFalse);
+    });
+
+    test('still refuses entries that escape after stripping', () async {
+      final out = p.join(temp.path, 'out');
+      await expectLater(
+        extractArchive(
+            await writeZip({'Lumide/a': 'a', 'Lumide/../../evil.txt': 'x'}),
+            out),
+        throwsFormatException,
+      );
+      expect(File(p.join(temp.path, 'evil.txt')).existsSync(), isFalse);
+    });
+  });
+
+  group('singleTopLevelDirectory', () {
+    test('finds the one wrapper folder', () {
+      expect(singleTopLevelDirectory(['Lumide/', 'Lumide/a', 'Lumide/b/c']),
+          'Lumide');
+      expect(singleTopLevelDirectory(['./Lumide/a', './Lumide/b']), 'Lumide');
+      expect(singleTopLevelDirectory([r'Lumide\a.exe', r'Lumide\b']), 'Lumide');
+    });
+
+    test('is null for several top-level items or a single file', () {
+      expect(singleTopLevelDirectory(['a/x', 'b/y']), isNull);
+      expect(singleTopLevelDirectory(['Lumide/a', 'readme.txt']), isNull);
+      expect(singleTopLevelDirectory(['Lumide']), isNull);
+      expect(singleTopLevelDirectory(['Lumide/']), isNull);
+      expect(singleTopLevelDirectory(<String>[]), isNull);
+    });
+
+    test('is null for unsafe names, so they are checked unchanged', () {
+      expect(singleTopLevelDirectory(['../x/a', '../x/b']), isNull);
+      expect(singleTopLevelDirectory(['/abs/a', '/abs/b']), isNull);
+    });
+  });
+
   group('archiveEntryTarget', () {
     final root = p.normalize(p.absolute(p.join('build', 'root')));
 

@@ -33,6 +33,11 @@ String defaultLinuxInstallDirectory() {
   return p.join(homeDirectoryPath(), '.local', 'share');
 }
 
+/// Extracts [archivePath] (.zip or .tar.gz) into [destinationDir].
+///
+/// If every entry sits in one top-level folder (the release archives wrap
+/// everything in `Lumide/`), that folder is dropped, like
+/// `tar --strip-components=1`.
 Future<void> extractArchive(String archivePath, String destinationDir) async {
   final bytes = await File(archivePath).readAsBytes();
   Archive? archive;
@@ -52,9 +57,19 @@ Future<void> extractArchive(String archivePath, String destinationDir) async {
   // ("zip slip": names like ../../x or absolute paths) cannot write outside
   // the destination and leaves nothing half-extracted.
   final root = p.normalize(p.absolute(destinationDir));
-  final entries = [
-    for (final file in archive) (file, archiveEntryTarget(root, file.name)),
-  ];
+  final wrapper = singleTopLevelDirectory(archive.map((file) => file.name));
+
+  final entries = <(ArchiveFile, String)>[];
+  for (final file in archive) {
+    var name = normalizeArchiveEntryName(file.name);
+    if (wrapper != null) {
+      // The wrapper folder itself, and junk outside it (e.g. __MACOSX/).
+      if (!name.startsWith('$wrapper/')) continue;
+      name = name.substring(wrapper.length + 1);
+      if (name.isEmpty) continue;
+    }
+    entries.add((file, archiveEntryTarget(root, name)));
+  }
 
   for (final (file, target) in entries) {
     if (file.isFile) {
@@ -70,6 +85,41 @@ Future<void> extractArchive(String archivePath, String destinationDir) async {
       await Directory(target).create(recursive: true);
     }
   }
+}
+
+/// [name] with `/` as the separator (some Windows tools write `\`) and
+/// without leading `./` segments.
+String normalizeArchiveEntryName(String name) {
+  var normalized = name.replaceAll(r'\', '/');
+  while (normalized.startsWith('./')) {
+    normalized = normalized.substring(2);
+  }
+  return normalized;
+}
+
+/// The one folder that every entry in [entryNames] sits in, or `null` when
+/// the entries are spread over several top-level items or the only one is
+/// a file. macOS metadata (`__MACOSX/`, `.DS_Store`) is ignored.
+String? singleTopLevelDirectory(Iterable<String> entryNames) {
+  String? top;
+  var hasContent = false;
+  for (final rawName in entryNames) {
+    final name = normalizeArchiveEntryName(rawName);
+    if (name.isEmpty || name == '.') continue;
+    final slash = name.indexOf('/');
+    final first = slash < 0 ? name : name.substring(0, slash);
+    if (first == '__MACOSX' || first == '.DS_Store') continue;
+    // An absolute name (leading '/') gives an empty first segment, so it is
+    // never stripped; archiveEntryTarget rejects it.
+    if (first.isEmpty || first == '..') return null;
+    if (top == null) {
+      top = first;
+    } else if (top != first) {
+      return null;
+    }
+    if (slash >= 0 && slash < name.length - 1) hasContent = true;
+  }
+  return hasContent ? top : null;
 }
 
 /// The path [entryName] extracts to inside [root], or a [FormatException]
