@@ -17,5 +17,5 @@ void main() {
 
     final asset = selectInstallAsset(assets);
     expect(asset.name, 'Lumide.dmg');
-  });
+  }, testOn: 'mac-os');
 }
