@@ -12,6 +12,7 @@ dependencies:
   path: ^1.9.1
   nocterm: ^0.8.0
   archive: ^4.0.9
+  ffi: ^2.1.0
 
 executables:
   lumide:

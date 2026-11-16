@@ -7,11 +7,13 @@ import 'dart:math';
 
 import 'package:args/command_runner.dart';
 import 'package:lumide/src/app_installer.dart';
+import 'package:lumide/src/app_version.dart';
 import 'package:lumide/src/background_tasks.dart';
 import 'package:lumide/src/constants.dart';
 import 'package:lumide/src/github_release_client.dart';
 import 'package:lumide/src/install_location_config.dart';
 import 'package:lumide/src/io_helpers.dart';
+import 'package:lumide/src/network_retry.dart';
 import 'package:lumide/src/release_asset_selector.dart';
 import 'package:nocterm/nocterm.dart';
 import 'package:path/path.dart' as p;
@@ -77,13 +79,14 @@ class InstallCommand extends Command<int> {
       // Nobody can answer the upgrade question, so it takes --force.
       final existingApp = force ? null : _findExistingApp(installDirectory);
       if (existingApp != null) {
+        final version = installedLumideVersion(existingApp);
         final action = installReplaces(installDirectory, existingApp)
             ? 'replace it'
             : 'install a separate copy in '
                 '${lumideInstallTarget(installDirectory)}';
         stdout.writeln(
-          'Lumide is already installed at $existingApp. Re-run with --force '
-          'to $action.',
+          'Lumide${version == null ? '' : ' $version'} is already installed '
+          'at $existingApp. Re-run with --force to $action.',
         );
         return 1;
       }
@@ -190,15 +193,30 @@ class InstallCommand extends Command<int> {
     required _AskConfirmation askConfirmation,
     required List<String> passthroughArguments,
   }) async {
+    final useLatestRelease = assetUrl == null || assetUrl.isEmpty;
+    ({Uri uri, String tag})? release;
+
     final existingApp = force ? null : _findExistingApp(installDirectory);
     if (existingApp != null) {
-      // A copy outside the folder the installer manages is never replaced.
+      // Look up the latest release first so the question can show both
+      // versions. One attempt only: keeping the existing copy needs no
+      // network, and after a Yes the lookup is tried again.
+      if (useLatestRelease) {
+        onStatus('Checking the latest release...');
+        try {
+          release =
+              await _resolveLatestReleaseAsset(repo, onStatus, maxAttempts: 1);
+        } catch (_) {}
+      }
+      final installed = installedLumideVersion(existingApp);
+      final versions = describeVersions(installed, release?.tag);
       final question = installReplaces(installDirectory, existingApp)
-          ? null
-          : 'Lumide is at $existingApp. Install a separate copy in '
-              '${lumideInstallTarget(installDirectory)}?';
+          ? 'Lumide is already installed ($versions). '
+              '${isUpToDate(installed, release?.tag) == true ? 'Reinstall it?' : 'Upgrade?'}'
+          : 'Lumide ($versions) is at $existingApp. Install a separate copy '
+              'in ${lumideInstallTarget(installDirectory)}?';
       if (!await askConfirmation(_PromptMode.confirmUpgrade, question)) {
-        _notes.add('Kept the existing Lumide at $existingApp.');
+        _notes.add('Kept the existing Lumide ($versions) at $existingApp.');
         if (shouldOfferToUseExistingInstall(installDirectory) &&
             await askConfirmation(_PromptMode.confirmUseExisting)) {
           await _rememberInstallDirectory(installDirectory);
@@ -212,9 +230,10 @@ class InstallCommand extends Command<int> {
 
     onStatus('Resolving latest release...');
     onProgress(0.02);
-    final downloadUri = assetUrl == null || assetUrl.isEmpty
-        ? await _resolveLatestReleaseAsset(repo, onStatus)
-        : Uri.parse(assetUrl);
+    if (useLatestRelease) {
+      release ??= await _resolveLatestReleaseAsset(repo, onStatus);
+    }
+    final downloadUri = release?.uri ?? Uri.parse(assetUrl!);
 
     onStatus('Downloading Lumide...');
     Directory? tempDir;
@@ -283,7 +302,8 @@ class InstallCommand extends Command<int> {
     }
 
     onProgress(1.0);
-    _notes.add('Installed Lumide at $resultPath');
+    final version = release == null ? '' : ' ${normalizeVersion(release.tag)}';
+    _notes.add('Installed Lumide$version at $resultPath');
     await _rememberInstallDirectory(installDirectory);
 
     if (await askConfirmation(_PromptMode.confirmLaunch)) {
@@ -344,18 +364,20 @@ class InstallCommand extends Command<int> {
     }).toList();
   }
 
-  Future<Uri> _resolveLatestReleaseAsset(
+  Future<({Uri uri, String tag})> _resolveLatestReleaseAsset(
     String repository,
-    void Function(String) onStatus,
-  ) async {
+    void Function(String) onStatus, {
+    int maxAttempts = kNetworkMaxAttempts,
+  }) async {
     final client = const GithubReleaseClient();
     final release = await client.fetchLatestRelease(
       repository: repository,
       onRetry: _reportRetry(onStatus),
+      maxAttempts: maxAttempts,
     );
     final asset = selectInstallAsset(release.assets);
     onStatus('Using release ${release.tagName} (${asset.name})');
-    return Uri.parse(asset.downloadUrl);
+    return (uri: Uri.parse(asset.downloadUrl), tag: release.tagName);
   }
 
   /// Shows "connection problem, retrying" messages while a request is retried.

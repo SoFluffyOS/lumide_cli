@@ -2,7 +2,9 @@ import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:lumide/src/app_installer.dart';
+import 'package:lumide/src/app_version.dart';
 import 'package:lumide/src/constants.dart';
+import 'package:lumide/src/github_release_client.dart';
 import 'package:lumide/src/install_location_config.dart';
 import 'package:lumide/src/lumide_process_environment.dart';
 import 'package:lumide/src/pub_client.dart';
@@ -48,6 +50,11 @@ class DoctorCommand extends Command<int> {
     final pluginPath = argResults?['plugin-path'] as String?;
 
     stdout.writeln('Checking Lumide environment...\n');
+    // Runs alongside the other checks; one attempt, so doctor never stalls.
+    final latestAppRelease = const GithubReleaseClient()
+        .fetchLatestRelease(repository: kDefaultGithubRepo, maxAttempts: 1)
+        .then<String?>((release) => release.tagName)
+        .catchError((Object _) => null);
     await LumideProcessEnvironment.initialize();
 
     // 1. CLI Version
@@ -75,6 +82,13 @@ class DoctorCommand extends Command<int> {
             : '';
     if (isLumideApp(appPath)) {
       stdout.writeln('[✓] Lumide App: Installed at $appPath$source');
+      final installed = installedLumideVersion(appPath);
+      final latest = await latestAppRelease;
+      final hint = isUpToDate(installed, latest) == false
+          ? ' (run `lumide install` to update)'
+          : '';
+      stdout
+          .writeln('    Version: ${describeVersions(installed, latest)}$hint');
     } else {
       stdout.writeln('[✗] Lumide App: Not found$source. Looked in:');
       for (final path in lumideAppSearchPaths()) {
