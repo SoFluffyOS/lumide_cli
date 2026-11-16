@@ -10,7 +10,7 @@ environment:
 dependencies:
   args: ^2.7.0
   path: ^1.9.1
-  nocterm: ^0.6.0
+  nocterm: ^0.8.0
   archive: ^4.0.9
 
 executables:
