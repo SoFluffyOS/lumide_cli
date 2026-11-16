@@ -64,10 +64,10 @@ class DoctorCommand extends Command<int> {
       final latestVersion = await client.fetchLatestVersion();
       if (latestVersion == null) {
         stdout.writeln(' (Unable to check for updates)');
-      } else if (latestVersion.contains(kLumideCliVersion)) {
-        stdout.writeln(' (Up to date)');
-      } else {
+      } else if (isUpToDate(kLumideCliVersion, latestVersion) == false) {
         stdout.writeln(' (New version available: $latestVersion)');
+      } else {
+        stdout.writeln(' (Up to date)');
       }
     } catch (_) {
       stdout.writeln(' (Unable to check for updates)');
