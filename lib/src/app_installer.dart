@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:lumide/src/background_tasks.dart';
 import 'package:lumide/src/constants.dart';
+import 'package:lumide/src/install_location_config.dart';
 import 'package:lumide/src/io_helpers.dart';
 import 'package:path/path.dart' as p;
 
@@ -66,17 +67,8 @@ class AppInstaller {
   ) async {
     await ensureDirectoryExists(installDirectory);
 
-    // For Linux, use the structure from install.sh: ~/.local/opt/lumide
-    // For Windows: LOCALAPPDATA/Lumide
-    final String destination;
-    if (Platform.isLinux) {
-      destination = p.join(homeDirectoryPath(), '.local', 'opt', 'lumide');
-    } else if (Platform.isWindows) {
-      destination = p.join(installDirectory, 'Lumide');
-    } else {
-      destination = p.join(installDirectory, 'Lumide');
-    }
-
+    final destination = lumideInstallTarget(installDirectory);
+    checkLumideInstallDirectory(installDirectory);
     final destDir = Directory(destination);
 
     if (await destDir.exists()) {
@@ -97,7 +89,7 @@ class AppInstaller {
       await _integrateLinuxDesktop(destination);
     }
 
-    return defaultLumideAppPath();
+    return lumideAppPathForInstallDirectory(installDirectory);
   }
 
   /// Adds Lumide to the app menu: copies its .desktop file and icon into
@@ -204,37 +196,31 @@ String? parseMountPoint(String plistOutput) {
   return match?.group(1);
 }
 
-String defaultLumideInstallDirectory() {
+/// The install directory set through [kLumideInstallDirEnvVar], or `null`.
+String? lumideInstallDirectoryOverride([Map<String, String>? environment]) {
+  final value = (environment ?? Platform.environment)[kLumideInstallDirEnvVar];
+  if (value == null || value.trim().isEmpty) return null;
+  return resolveLumideInstallDirectory(value.trim());
+}
+
+/// [kLumideInstallDirEnvVar], else the folder saved by
+/// `lumide install --install-dir`, else `null`.
+String? configuredLumideInstallDirectory([Map<String, String>? environment]) {
+  return lumideInstallDirectoryOverride(environment) ??
+      savedLumideInstallDirectory(environment);
+}
+
+/// The install directory when nothing is configured.
+String platformDefaultLumideInstallDirectory() {
   if (Platform.isMacOS) return defaultMacOsInstallDirectory();
   if (Platform.isWindows) return defaultWindowsInstallDirectory();
   return defaultLinuxInstallDirectory();
 }
 
-String defaultLumideAppPath() {
-  if (Platform.isMacOS) {
-    final systemInstall = p.join('/Applications', kLumideAppBundleName);
-    if (Directory(systemInstall).existsSync()) {
-      return systemInstall;
-    }
-
-    final userInstall = p.join(
-      homeDirectoryPath(),
-      'Applications',
-      kLumideAppBundleName,
-    );
-    if (Directory(userInstall).existsSync()) {
-      return userInstall;
-    }
-
-    return systemInstall;
-  }
-
-  if (Platform.isWindows) {
-    return p.join(defaultWindowsInstallDirectory(), 'Lumide', 'Lumide.exe');
-  }
-
-  // Linux structure from install.sh
-  return p.join(homeDirectoryPath(), '.local', 'opt', 'lumide', 'Lumide');
+/// The configured install directory, else the platform default.
+String defaultLumideInstallDirectory([Map<String, String>? environment]) {
+  return configuredLumideInstallDirectory(environment) ??
+      platformDefaultLumideInstallDirectory();
 }
 
 /// [desktopEntry] with every `Exec=` line (including actions such as
@@ -268,4 +254,227 @@ String quoteDesktopExecArgument(String argument) {
       .replaceAll('`', r'\`')
       .replaceAll(r'$', r'\$');
   return '"$escaped"';
+}
+
+/// Whether to offer using the Lumide already in [installDirectory] from now
+/// on: not when [kLumideInstallDirEnvVar] is set (it decides anyway) or
+/// when other commands already use that folder.
+bool shouldOfferToUseExistingInstall(
+  String installDirectory, [
+  Map<String, String>? environment,
+]) {
+  return lumideInstallDirectoryOverride(environment) == null &&
+      !p.equals(defaultLumideInstallDirectory(environment), installDirectory);
+}
+
+/// Where the archive is extracted on Linux for [installDirectory].
+///
+/// The default location keeps the structure from install.sh
+/// (`~/.local/opt/lumide`); any other directory gets a `lumide` subfolder.
+String linuxInstallDestination(String installDirectory) {
+  if (p.equals(installDirectory, defaultLinuxInstallDirectory())) {
+    return p.join(homeDirectoryPath(), '.local', 'opt', 'lumide');
+  }
+  return p.join(installDirectory, 'lumide');
+}
+
+/// The folder `lumide install` writes the app to (and replaces on upgrade)
+/// for [installDirectory].
+String lumideInstallTarget(String installDirectory, {String? operatingSystem}) {
+  return switch (operatingSystem ?? Platform.operatingSystem) {
+    'macos' => p.join(installDirectory, kLumideAppBundleName),
+    'windows' => p.join(installDirectory, 'Lumide'),
+    _ => linuxInstallDestination(installDirectory),
+  };
+}
+
+/// Where Lumide can be for [installDirectory], in the order they are
+/// checked: where `lumide install` puts it, the doubled `Lumide/Lumide`
+/// layout older CLI versions created from the 0.25 archives, and (Windows,
+/// Linux) [installDirectory] being the app's own folder, e.g. an archive
+/// unzipped by hand. A fixed list rather than a search, so a stray old
+/// copy is never picked up.
+List<String> lumideAppCandidatesForInstallDirectory(
+  String installDirectory, {
+  String? operatingSystem,
+}) {
+  final os = operatingSystem ?? Platform.operatingSystem;
+  final target = lumideInstallTarget(installDirectory, operatingSystem: os);
+  return switch (os) {
+    'macos' => [target],
+    'windows' => [
+        p.join(target, 'Lumide.exe'),
+        p.join(target, 'Lumide', 'Lumide.exe'),
+        p.join(installDirectory, 'Lumide.exe'),
+      ],
+    _ => [
+        p.join(target, 'Lumide'),
+        p.join(target, 'Lumide', 'Lumide'),
+        p.join(installDirectory, 'Lumide'),
+        p.join(installDirectory, 'Lumide', 'Lumide'),
+      ],
+  };
+}
+
+/// Whether installing into [installDirectory] replaces [appPath], i.e. it
+/// lies in [lumideInstallTarget]. A copy elsewhere is left alone.
+bool installReplaces(
+  String installDirectory,
+  String appPath, {
+  String? operatingSystem,
+}) {
+  final target =
+      lumideInstallTarget(installDirectory, operatingSystem: operatingSystem);
+  return p.equals(target, appPath) || p.isWithin(target, appPath);
+}
+
+/// Whether [lumideInstallTarget] of [installDirectory] holds an installed
+/// Lumide (in either layout), so `lumide install` may replace it.
+bool hasManagedLumideInstall(
+  String installDirectory, {
+  String? operatingSystem,
+}) {
+  return lumideAppCandidatesForInstallDirectory(installDirectory,
+          operatingSystem: operatingSystem)
+      .where((path) => installReplaces(installDirectory, path,
+          operatingSystem: operatingSystem))
+      .any((path) => isLumideApp(path, operatingSystem: operatingSystem));
+}
+
+/// Whether [folder] is the app folder of an installed Lumide, i.e. the
+/// [lumideInstallTarget] of its parent with Lumide in it.
+bool _isLumideAppFolder(String folder, {String? operatingSystem}) {
+  final parent = p.dirname(folder);
+  return !p.equals(parent, folder) &&
+      p.equals(lumideInstallTarget(parent, operatingSystem: operatingSystem),
+          folder) &&
+      hasManagedLumideInstall(parent, operatingSystem: operatingSystem);
+}
+
+/// [installDirectory] as an absolute path, or its parent when it is the app
+/// folder of an installed Lumide, so `D:\Tools` and `D:\Tools\Lumide` name
+/// the same installation.
+String resolveLumideInstallDirectory(
+  String installDirectory, {
+  String? operatingSystem,
+}) {
+  final directory = p.normalize(p.absolute(installDirectory));
+  return _isLumideAppFolder(directory, operatingSystem: operatingSystem)
+      ? p.dirname(directory)
+      : directory;
+}
+
+/// The app folder of an installed Lumide that [installDirectory] lies
+/// inside, or `null`. Installing there is unsafe: upgrading that Lumide
+/// replaces its whole folder.
+String? enclosingLumideAppFolder(
+  String installDirectory, {
+  String? operatingSystem,
+}) {
+  var folder = p.normalize(p.absolute(installDirectory));
+  while (true) {
+    final parent = p.dirname(folder);
+    if (p.equals(parent, folder)) return null;
+    folder = parent;
+    if (_isLumideAppFolder(folder, operatingSystem: operatingSystem)) {
+      return folder;
+    }
+  }
+}
+
+/// Throws a [ProcessException] explaining why `lumide install` must not
+/// write to [installDirectory]: it lies inside an installed Lumide, or its
+/// [lumideInstallTarget] is an unrelated folder that would be replaced.
+void checkLumideInstallDirectory(String installDirectory) {
+  final enclosing = enclosingLumideAppFolder(installDirectory);
+  if (enclosing != null) {
+    throw ProcessException(
+      'install',
+      [installDirectory],
+      '$installDirectory is inside the Lumide installation at $enclosing, '
+          'which is replaced when Lumide is upgraded. Choose a folder '
+          'outside it.',
+    );
+  }
+  final unrelated = unrelatedFolderAtInstallTarget(installDirectory);
+  if (unrelated != null) {
+    throw ProcessException(
+      'install',
+      [installDirectory],
+      '$unrelated already exists and is not a Lumide installation, so it '
+          'was left untouched. Choose another --install-dir, or move that '
+          'folder.',
+    );
+  }
+}
+
+/// [lumideInstallTarget] of [installDirectory] when it exists but holds no
+/// Lumide, or `null`. `lumide install` replaces that folder, so it must not
+/// touch one that is something else.
+String? unrelatedFolderAtInstallTarget(
+  String installDirectory, {
+  String? operatingSystem,
+}) {
+  final target =
+      lumideInstallTarget(installDirectory, operatingSystem: operatingSystem);
+  if (FileSystemEntity.typeSync(target) == FileSystemEntityType.notFound) {
+    return null;
+  }
+  return hasManagedLumideInstall(installDirectory,
+          operatingSystem: operatingSystem)
+      ? null
+      : target;
+}
+
+/// Whether [path] is a Lumide app: an app bundle (a folder) on macOS, an
+/// executable file elsewhere. A folder named `Lumide` on Linux is not.
+bool isLumideApp(String path, {String? operatingSystem}) {
+  final os = operatingSystem ?? Platform.operatingSystem;
+  final type = FileSystemEntity.typeSync(path);
+  return os == 'macos'
+      ? type == FileSystemEntityType.directory
+      : type == FileSystemEntityType.file;
+}
+
+/// The first of [paths] that is a Lumide app, else the first one.
+String _firstAppOrFirst(List<String> paths, {String? operatingSystem}) {
+  return paths.firstWhere(
+    (path) => isLumideApp(path, operatingSystem: operatingSystem),
+    orElse: () => paths.first,
+  );
+}
+
+/// The Lumide app for [installDirectory]: the first existing candidate, or
+/// where `lumide install` would put it.
+String lumideAppPathForInstallDirectory(
+  String installDirectory, {
+  String? operatingSystem,
+}) {
+  return _firstAppOrFirst(
+    lumideAppCandidatesForInstallDirectory(installDirectory,
+        operatingSystem: operatingSystem),
+    operatingSystem: operatingSystem,
+  );
+}
+
+/// Every place checked for Lumide when [installDirectory] is used. For the
+/// default folder on macOS that includes `~/Applications`, as before.
+List<String> lumideAppSearchPathsFor(String installDirectory) {
+  return [
+    ...lumideAppCandidatesForInstallDirectory(installDirectory),
+    if (Platform.isMacOS &&
+        p.equals(installDirectory, platformDefaultLumideInstallDirectory()))
+      p.join(homeDirectoryPath(), 'Applications', kLumideAppBundleName),
+  ];
+}
+
+/// Every place checked for the installed Lumide, in order.
+List<String> lumideAppSearchPaths([Map<String, String>? environment]) {
+  return lumideAppSearchPathsFor(defaultLumideInstallDirectory(environment));
+}
+
+/// The installed Lumide: the first of [lumideAppSearchPaths] that exists,
+/// or where `lumide install` would put it.
+String defaultLumideAppPath([Map<String, String>? environment]) {
+  return _firstAppOrFirst(lumideAppSearchPaths(environment));
 }

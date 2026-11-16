@@ -10,12 +10,17 @@ import 'package:lumide/src/app_installer.dart';
 import 'package:lumide/src/background_tasks.dart';
 import 'package:lumide/src/constants.dart';
 import 'package:lumide/src/github_release_client.dart';
+import 'package:lumide/src/install_location_config.dart';
 import 'package:lumide/src/io_helpers.dart';
 import 'package:lumide/src/release_asset_selector.dart';
 import 'package:nocterm/nocterm.dart';
 import 'package:path/path.dart' as p;
 
 class InstallCommand extends Command<int> {
+  /// Printed after the install screen closes (or at the end with --silent),
+  /// so they stay visible.
+  final _notes = <String>[];
+
   InstallCommand() {
     argParser
       ..addOption(
@@ -56,7 +61,10 @@ class InstallCommand extends Command<int> {
 
   @override
   Future<int> run() async {
-    final installDirectory = argResults?['install-dir'] as String;
+    // Absolute, so a remembered folder works from any directory, and the
+    // app's own folder (D:\Tools\Lumide) means its install folder (D:\Tools).
+    final installDirectory =
+        resolveLumideInstallDirectory(argResults?['install-dir'] as String);
     final repo = argResults?['repo'] as String;
     final force = argResults?['force'] as bool;
     final assetUrl = argResults?['asset-url'] as String?;
@@ -74,10 +82,12 @@ class InstallCommand extends Command<int> {
         onProgress: (p) =>
             stdout.write('\rInstalling... ${(p * 100).toInt()}%'),
         onStatus: (s) => stdout.writeln('\n$s'),
-        askConfirmation: (_) async => true, // Auto-confirm
+        askConfirmation: (_, [__]) async => true, // Auto-confirm
         passthroughArguments: passthroughArgs,
       );
-      stdout.writeln('\nDone.');
+      stdout.writeln();
+      _notes.forEach(stdout.writeln);
+      stdout.writeln('Done.');
       return 0;
     }
 
@@ -103,7 +113,58 @@ class InstallCommand extends Command<int> {
       ),
     );
 
-    return completer.future;
+    final exitCode = await completer.future;
+    _notes.forEach(stdout.writeln);
+    return exitCode;
+  }
+
+  /// The Lumide already where [installDirectory] points, if any.
+  String? _findExistingApp(String installDirectory) {
+    return lumideAppSearchPathsFor(installDirectory)
+        .where(isLumideApp)
+        .firstOrNull;
+  }
+
+  /// Remembers [installDirectory] so `lumide`, `launch` and `doctor` find the
+  /// app later, and says so. Installing back into the platform default
+  /// forgets a previously saved directory.
+  Future<void> _rememberInstallDirectory(String installDirectory) async {
+    final override = lumideInstallDirectoryOverride();
+    if (override != null) {
+      if (!p.equals(override, installDirectory)) {
+        _notes.add(
+          'Note: $kLumideInstallDirEnvVar is set to $override, so other '
+          'commands keep using that folder.',
+        );
+      }
+      return;
+    }
+
+    final isPlatformDefault =
+        p.equals(installDirectory, platformDefaultLumideInstallDirectory());
+    final previouslySaved = savedLumideInstallDirectory();
+    try {
+      await saveLumideInstallDirectory(
+          isPlatformDefault ? null : installDirectory);
+      if (!isPlatformDefault) {
+        _notes.add(
+          'Remembered $installDirectory, so `lumide`, `lumide launch` and '
+          '`lumide doctor` will find it.',
+        );
+      } else if (previouslySaved != null) {
+        _notes.add(
+          'Forgot the saved folder $previouslySaved; using the default '
+          'location again.',
+        );
+      }
+    } catch (error) {
+      if (isPlatformDefault) return;
+      _notes.add(
+        'Could not save the install location ($error). Set '
+        '$kLumideInstallDirEnvVar=$installDirectory so other commands can '
+        'find Lumide.',
+      );
+    }
   }
 
   Future<void> _performInstall({
@@ -113,18 +174,28 @@ class InstallCommand extends Command<int> {
     required String? assetUrl,
     required void Function(double) onProgress,
     required void Function(String) onStatus,
-    required Future<bool> Function(_PromptMode) askConfirmation,
+    required _AskConfirmation askConfirmation,
     required List<String> passthroughArguments,
   }) async {
-    // Check if already installed
-    final appPath = defaultLumideAppPath();
-    if (File(appPath).existsSync() && !force) {
-      final confirmed = await askConfirmation(_PromptMode.confirmUpgrade);
-      if (!confirmed) {
-        onStatus('Installation cancelled.');
+    final existingApp = force ? null : _findExistingApp(installDirectory);
+    if (existingApp != null) {
+      // A copy outside the folder the installer manages is never replaced.
+      final question = installReplaces(installDirectory, existingApp)
+          ? null
+          : 'Lumide is at $existingApp. Install a separate copy in '
+              '${lumideInstallTarget(installDirectory)}?';
+      if (!await askConfirmation(_PromptMode.confirmUpgrade, question)) {
+        _notes.add('Kept the existing Lumide at $existingApp.');
+        if (shouldOfferToUseExistingInstall(installDirectory) &&
+            await askConfirmation(_PromptMode.confirmUseExisting)) {
+          await _rememberInstallDirectory(installDirectory);
+        }
         return;
       }
     }
+
+    // Before downloading: refuse folders the install would damage.
+    checkLumideInstallDirectory(installDirectory);
 
     onStatus('Resolving latest release...');
     onProgress(0.02);
@@ -134,6 +205,7 @@ class InstallCommand extends Command<int> {
 
     onStatus('Downloading Lumide...');
     Directory? tempDir;
+    final String resultPath;
     try {
       // Map download 0-100% to total 5-85%
       final downloadResult = await _downloadAsset(downloadUri, (p) {
@@ -172,16 +244,7 @@ class InstallCommand extends Command<int> {
           );
 
           onStatus('Finalizing installation...');
-          onProgress(0.98);
-
-          final resultPath = destination;
-          onStatus('Installed Lumide at $resultPath');
-          onProgress(1.0);
-
-          final shouldLaunch = await askConfirmation(_PromptMode.confirmLaunch);
-          if (shouldLaunch) {
-            await _launchApp(resultPath, passthroughArguments);
-          }
+          resultPath = destination;
         } finally {
           await Process.run('hdiutil', ['detach', '-force', mountPoint]);
         }
@@ -190,20 +253,11 @@ class InstallCommand extends Command<int> {
         onStatus('Extracting archive...');
         onProgress(0.90);
 
-        final resultPath = await installer.install(
+        resultPath = await installer.install(
           packagePath: downloadedFile.path,
           installDirectory: installDirectory,
           force: true,
         );
-
-        onProgress(0.98);
-        onStatus('Installed Lumide at $resultPath');
-        onProgress(1.0);
-
-        final shouldLaunch = await askConfirmation(_PromptMode.confirmLaunch);
-        if (shouldLaunch) {
-          await _launchApp(resultPath, passthroughArguments);
-        }
       }
     } finally {
       if (tempDir != null && tempDir.existsSync()) {
@@ -213,6 +267,14 @@ class InstallCommand extends Command<int> {
           // Best effort cleanup
         }
       }
+    }
+
+    onProgress(1.0);
+    _notes.add('Installed Lumide at $resultPath');
+    await _rememberInstallDirectory(installDirectory);
+
+    if (await askConfirmation(_PromptMode.confirmLaunch)) {
+      await _launchApp(resultPath, passthroughArguments);
     }
   }
 
@@ -329,7 +391,7 @@ class _InstallTui extends StatefulComponent {
   final Future<void> Function(
     void Function(double) onProgress,
     void Function(String) onStatus,
-    Future<bool> Function(_PromptMode) askConfirmation,
+    _AskConfirmation askConfirmation,
   ) installTask;
   final void Function(int) onDone;
 
@@ -343,7 +405,19 @@ class _InstallTui extends StatefulComponent {
   State<_InstallTui> createState() => _InstallTuiState();
 }
 
-enum _PromptMode { none, confirmInstall, confirmUpgrade, confirmLaunch }
+enum _PromptMode {
+  none,
+  confirmInstall,
+  confirmUpgrade,
+  confirmUseExisting,
+  confirmLaunch,
+}
+
+/// Asks a yes/no question; [question] replaces the mode's default text.
+typedef _AskConfirmation = Future<bool> Function(
+  _PromptMode mode, [
+  String? question,
+]);
 
 class _InstallTuiState extends State<_InstallTui> {
   double _progress = 0.0;
@@ -351,8 +425,10 @@ class _InstallTuiState extends State<_InstallTui> {
   String? _error;
 
   _PromptMode _currentPrompt = _PromptMode.none;
+  String? _promptQuestion;
   Completer<bool>? _promptCompleter;
   int _choiceIndex = 0;
+  bool _finished = false;
 
   int _featureIndex = 0;
   Timer? _featureTimer;
@@ -439,23 +515,27 @@ class _InstallTuiState extends State<_InstallTui> {
         (s) {
           if (mounted) setState(() => _status = s);
         },
-        (mode) async {
-          if (mounted) setState(() => _currentPrompt = mode);
+        (mode, [question]) async {
+          if (mounted) {
+            setState(() {
+              _currentPrompt = mode;
+              _promptQuestion = question;
+              _choiceIndex = 0; // Each question starts on "Yes".
+            });
+          }
           _promptCompleter = Completer<bool>();
           final result = await _promptCompleter!.future;
           if (mounted) {
             setState(() {
               _currentPrompt = _PromptMode.none;
+              _promptQuestion = null;
               _promptCompleter = null;
             });
           }
           return result;
         },
       );
-      if (mounted) {
-        shutdownApp();
-      }
-      component.onDone(0);
+      _finish(0);
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -479,10 +559,19 @@ class _InstallTuiState extends State<_InstallTui> {
         }
         _runInstall();
       } else {
-        shutdownApp();
-        component.onDone(0);
+        _finish(0);
       }
     }
+  }
+
+  /// Closes the screen and hands [exitCode] back to the command. Unlike
+  /// shutdownApp(), TerminalBinding.shutdown() restores the terminal
+  /// without calling exit(), so the command can still print and return.
+  void _finish(int exitCode) {
+    if (_finished) return;
+    _finished = true;
+    TerminalBinding.instance.shutdown();
+    component.onDone(exitCode);
   }
 
   Component _buildChoice(
@@ -570,14 +659,17 @@ class _InstallTuiState extends State<_InstallTui> {
             ],
           );
         } else if (_currentPrompt != _PromptMode.none) {
-          final question = switch (_currentPrompt) {
-            _PromptMode.confirmInstall =>
-              'Lumide is not installed. Install now?',
-            _PromptMode.confirmUpgrade =>
-              'Lumide is already installed. Upgrade?',
-            _PromptMode.confirmLaunch => 'Success! Launch Lumide now?',
-            _ => '',
-          };
+          final question = _promptQuestion ??
+              switch (_currentPrompt) {
+                _PromptMode.confirmInstall =>
+                  'Lumide is not installed. Install now?',
+                _PromptMode.confirmUpgrade =>
+                  'Lumide is already installed. Upgrade?',
+                _PromptMode.confirmUseExisting =>
+                  'Use the Lumide already in this folder from now on?',
+                _PromptMode.confirmLaunch => 'Success! Launch Lumide now?',
+                _ => '',
+              };
 
           content = Column(
             mainAxisSize: MainAxisSize.min,
@@ -651,8 +743,7 @@ class _InstallTuiState extends State<_InstallTui> {
             if (event.logicalKey == LogicalKey.keyQ ||
                 (event.logicalKey == LogicalKey.keyC &&
                     event.isControlPressed)) {
-              shutdownApp();
-              component.onDone(1);
+              _finish(1);
               return true;
             }
 

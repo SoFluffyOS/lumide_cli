@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:args/command_runner.dart';
 import 'package:lumide/src/app_installer.dart';
 import 'package:lumide/src/constants.dart';
+import 'package:lumide/src/install_location_config.dart';
 import 'package:lumide/src/lumide_process_environment.dart';
 import 'package:lumide/src/pub_client.dart';
 import 'package:path/path.dart' as p;
@@ -67,12 +68,22 @@ class DoctorCommand extends Command<int> {
 
     // 2. Lumide App
     final appPath = defaultLumideAppPath();
-    final entity = FileSystemEntity.typeSync(appPath);
-    if (entity != FileSystemEntityType.notFound) {
-      stdout.writeln('[✓] Lumide App: Installed at $appPath');
+    final source = lumideInstallDirectoryOverride() != null
+        ? ' (from $kLumideInstallDirEnvVar)'
+        : savedLumideInstallDirectory() != null
+            ? ' (saved by `lumide install --install-dir`)'
+            : '';
+    if (isLumideApp(appPath)) {
+      stdout.writeln('[✓] Lumide App: Installed at $appPath$source');
     } else {
+      stdout.writeln('[✗] Lumide App: Not found$source. Looked in:');
+      for (final path in lumideAppSearchPaths()) {
+        stdout.writeln('      $path');
+      }
       stdout.writeln(
-        '[✗] Lumide App: Not found. Run `lumide install` to set it up.',
+        '    Run `lumide install` to set it up, or set '
+        '$kLumideInstallDirEnvVar to the folder that contains your Lumide '
+        'installation.',
       );
     }
 

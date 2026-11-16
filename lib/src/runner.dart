@@ -27,9 +27,7 @@ Future<int> runLumide(List<String> arguments) async {
 
   var effectiveArguments = arguments;
   if (effectiveArguments.isEmpty) {
-    final appPath = defaultLumideAppPath();
-    final entity = FileSystemEntity.typeSync(appPath);
-    if (entity == FileSystemEntityType.notFound) {
+    if (!isLumideApp(defaultLumideAppPath())) {
       effectiveArguments = ['install', '--prompt'];
     } else {
       effectiveArguments = ['launch'];
@@ -45,9 +43,7 @@ Future<int> runLumide(List<String> arguments) async {
 
   // Redirect to install if Lumide is missing during a launch attempt
   if (effectiveArguments.isNotEmpty && effectiveArguments.first == 'launch') {
-    final appPath = defaultLumideAppPath();
-    final entity = FileSystemEntity.typeSync(appPath);
-    if (entity == FileSystemEntityType.notFound) {
+    if (!isLumideApp(defaultLumideAppPath())) {
       final remainingArgs = effectiveArguments.skip(1).toList();
       effectiveArguments = ['install', '--prompt', ...remainingArgs];
     }
