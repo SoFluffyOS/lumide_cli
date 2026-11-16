@@ -48,11 +48,18 @@ Future<void> extractArchive(String archivePath, String destinationDir) async {
     throw Exception('Unsupported archive format: $archivePath');
   }
 
-  for (final file in archive) {
-    final filename = file.name;
+  // Check every entry before writing anything, so a malicious archive
+  // ("zip slip": names like ../../x or absolute paths) cannot write outside
+  // the destination and leaves nothing half-extracted.
+  final root = p.normalize(p.absolute(destinationDir));
+  final entries = [
+    for (final file in archive) (file, archiveEntryTarget(root, file.name)),
+  ];
+
+  for (final (file, target) in entries) {
     if (file.isFile) {
       final data = file.content as List<int>;
-      final outFile = File(p.join(destinationDir, filename));
+      final outFile = File(target);
       await outFile.create(recursive: true);
       await outFile.writeAsBytes(data);
 
@@ -60,9 +67,20 @@ Future<void> extractArchive(String archivePath, String destinationDir) async {
         await Process.run('chmod', ['+x', outFile.path]);
       }
     } else {
-      await Directory(p.join(destinationDir, filename)).create(recursive: true);
+      await Directory(target).create(recursive: true);
     }
   }
+}
+
+/// The path [entryName] extracts to inside [root], or a [FormatException]
+/// when it would end up outside it.
+String archiveEntryTarget(String root, String entryName) {
+  final target = p.normalize(p.join(root, entryName));
+  if (!p.isWithin(root, target) && !p.equals(root, target)) {
+    throw FormatException(
+        'Refusing to extract "$entryName": it points outside $root.');
+  }
+  return target;
 }
 
 Future<void> ensureDirectoryExists(String path) async {
