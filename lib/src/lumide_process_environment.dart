@@ -75,4 +75,43 @@ class LumideProcessEnvironment {
     }
     return null;
   }
+
+  /// What a bare `dart` started by Lumide.exe gets on Windows.
+  ///
+  /// Windows (`CreateProcess`) starts a bare command name only as an
+  /// `.exe`, looking in the starting program's own folder ([appFolder])
+  /// before [pathEntries] (by default Lumide's PATH), so a `dart.bat`
+  /// (Flutter's wrapper in `flutter\bin`) is never run. [exe] is the
+  /// `dart.exe` found; when there is none, [batch] is the `dart.bat` or
+  /// `dart.cmd` on the PATH and [sdkBin] the folder of the `dart.exe`
+  /// behind it (Flutter keeps it in `bin\cache\dart-sdk\bin`), if present.
+  static ({String? exe, String? batch, String? sdkBin}) windowsDart({
+    String? appFolder,
+    List<String>? pathEntries,
+  }) {
+    if (appFolder != null) {
+      final bundled = p.join(appFolder, 'dart.exe');
+      if (File(bundled).existsSync()) {
+        return (exe: bundled, batch: null, sdkBin: null);
+      }
+    }
+    final directories = (pathEntries ?? path.split(';'))
+        .map((entry) => entry.trim())
+        .where((entry) => entry.isNotEmpty);
+    String? batch;
+    for (final directory in directories) {
+      final exe = p.join(directory, 'dart.exe');
+      if (File(exe).existsSync()) return (exe: exe, batch: null, sdkBin: null);
+      batch ??= [p.join(directory, 'dart.bat'), p.join(directory, 'dart.cmd')]
+          .where((candidate) => File(candidate).existsSync())
+          .firstOrNull;
+    }
+    if (batch == null) return (exe: null, batch: null, sdkBin: null);
+    final sdkBin = p.join(p.dirname(batch), 'cache', 'dart-sdk', 'bin');
+    return (
+      exe: null,
+      batch: batch,
+      sdkBin: File(p.join(sdkBin, 'dart.exe')).existsSync() ? sdkBin : null,
+    );
+  }
 }
