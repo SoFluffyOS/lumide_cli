@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:lumide/src/app_installer.dart';
+import 'package:lumide/src/lumide_process_environment.dart';
 
 class LaunchCommand extends Command<int> {
   LaunchCommand() {
@@ -47,13 +48,24 @@ class LaunchCommand extends Command<int> {
         final absoluteArgs = _resolveAbsoluteArgs(passthroughArguments);
         arguments.addAll(absoluteArgs);
       }
+      // Lets Lumide's plugins start `dart` when PATH only has Flutter's
+      // dart.bat.
+      final environment =
+          LumideProcessEnvironment.windowsLaunchEnvironment(appPath);
       await Process.start(
         appPath,
         arguments,
+        environment: environment,
         mode: ProcessStartMode.detached,
         runInShell: true,
       );
       stdout.writeln('Launched Lumide from $appPath');
+      if (environment != null) {
+        stdout.writeln(
+          "Added Flutter's Dart SDK to Lumide's PATH so its plugins can "
+          'start `dart`.',
+        );
+      }
     } else {
       // Linux
       if (passthroughArguments.isNotEmpty) {

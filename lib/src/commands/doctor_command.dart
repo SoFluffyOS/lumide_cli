@@ -151,7 +151,16 @@ class DoctorCommand extends Command<int> {
     }
 
     if (pluginPath != null && pluginPath.trim().isNotEmpty) {
-      await _checkPluginPubGet(pluginPath.trim(), environment, pluginDart);
+      // With only Flutter's dart.bat in PATH, probe with the dart.exe Lumide
+      // gets when the CLI starts it.
+      final sdkBin = windowsDart?.sdkBin;
+      final launchDart = sdkBin == null ? null : p.join(sdkBin, 'dart.exe');
+      await _checkPluginPubGet(
+        pluginPath.trim(),
+        environment,
+        pluginDart ?? launchDart,
+        viaLaunch: pluginDart == null && launchDart != null,
+      );
     }
 
     // 4. Flutter SDK
@@ -243,24 +252,40 @@ class DoctorCommand extends Command<int> {
           'that contains dart.exe to PATH.');
       return;
     }
-    stdout.writeln('[✗] Dart SDK (plugin startup): only $batch is in PATH.');
+    final sdkBin = dart.sdkBin;
+    if (sdkBin == null) {
+      stdout.writeln('[✗] Dart SDK (plugin startup): only $batch is in PATH.');
+      stdout.writeln('    Lumide starts plugins with a bare `dart`, which '
+          'Windows only runs as dart.exe.');
+      stdout.writeln('    Fix: add the folder that contains dart.exe to PATH, '
+          'then restart Lumide.');
+      return;
+    }
+    // `lumide launch` adds sdkBin to Lumide's PATH (see
+    // LumideProcessEnvironment.windowsLaunchEnvironment).
+    stdout.writeln('[!] Dart SDK (plugin startup): only $batch is in PATH.');
     stdout.writeln('    Lumide starts plugins with a bare `dart`, which '
-        'Windows only runs as dart.exe.');
-    final fix = dart.sdkBin == null
-        ? 'add the folder that contains dart.exe to PATH'
-        : 'add ${dart.sdkBin} to PATH (after ${p.dirname(batch)})';
-    stdout.writeln('    Fix: $fix, then restart Lumide.');
+        'Windows only runs as dart.exe. When started with `lumide` or '
+        '`lumide launch`, Lumide gets $sdkBin added to its PATH, so plugins '
+        'work.');
+    stdout.writeln('    To start Lumide another way (Start menu, shortcut), '
+        'add $sdkBin to PATH (after ${p.dirname(batch)}).');
   }
 
   Future<void> _checkPluginPubGet(
     String pluginPath,
     Map<String, String> environment,
-    String? dartExecutable,
-  ) async {
+    String? dartExecutable, {
+    bool viaLaunch = false,
+  }) async {
     final absolutePath = p.absolute(pluginPath);
     stdout.writeln('\nPlugin startup process probe:');
     stdout.writeln('    command: dart pub get');
     stdout.writeln('    working directory: $absolutePath');
+    if (viaLaunch) {
+      stdout.writeln('    dart: $dartExecutable (as Lumide gets it when '
+          'started with `lumide` or `lumide launch`)');
+    }
     if (!await Directory(absolutePath).exists()) {
       stdout.writeln('[✗] Plugin path does not exist or is not a directory.');
       return;

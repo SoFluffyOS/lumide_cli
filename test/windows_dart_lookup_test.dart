@@ -62,4 +62,46 @@ void main() {
     expect(result.batch, isNull);
     expect(result.sdkBin, isNull);
   });
+
+  group('launchEnvironmentWithDart (the PATH Lumide is started with)', () {
+    test("appends Flutter's Dart SDK when PATH only has dart.bat", () {
+      final other = p.join(temp.path, 'other');
+      final env = {'Path': '$other;$flutterBin', 'HOME': 'x'};
+      expect(LumideProcessEnvironment.launchEnvironmentWithDart(env),
+          {'Path': '$other;$flutterBin;$sdkBin'});
+    });
+
+    test('keeps the name of the PATH variable (case-insensitive on Windows)',
+        () {
+      expect(
+        LumideProcessEnvironment.launchEnvironmentWithDart(
+            {'PATH': flutterBin}),
+        {'PATH': '$flutterBin;$sdkBin'},
+      );
+    });
+
+    test('changes nothing when Lumide already finds a dart.exe', () {
+      expect(
+        LumideProcessEnvironment.launchEnvironmentWithDart(
+            {'Path': '$flutterBin;$sdkBin'}),
+        isNull,
+      );
+      final appFolder = p.join(temp.path, 'Lumide');
+      touch(p.join(appFolder, 'dart.exe'));
+      expect(
+        LumideProcessEnvironment.launchEnvironmentWithDart({'Path': flutterBin},
+            appFolder: appFolder),
+        isNull,
+      );
+    });
+
+    test('changes nothing when there is no Dart SDK to add', () {
+      final other = p.join(temp.path, 'tools');
+      touch(p.join(other, 'dart.cmd'));
+      expect(
+          LumideProcessEnvironment.launchEnvironmentWithDart({'Path': other}),
+          isNull);
+      expect(LumideProcessEnvironment.launchEnvironmentWithDart({}), isNull);
+    });
+  });
 }
