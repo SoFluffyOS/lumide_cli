@@ -7,10 +7,13 @@ import 'package:archive/archive.dart';
 import 'package:archive/archive_io.dart';
 import 'package:path/path.dart' as p;
 
-String homeDirectoryPath() {
-  final home = Platform.isWindows
-      ? Platform.environment['USERPROFILE']
-      : Platform.environment['HOME'];
+String homeDirectoryPath([
+  Map<String, String>? environment,
+  String? operatingSystem,
+]) {
+  final env = environment ?? Platform.environment;
+  final os = operatingSystem ?? Platform.operatingSystem;
+  final home = os == 'windows' ? env['USERPROFILE'] : env['HOME'];
   if (home == null || home.isEmpty) {
     throw const OSError('Home directory not set.');
   }
@@ -21,17 +24,34 @@ String defaultMacOsInstallDirectory() {
   return '/Applications';
 }
 
-String defaultWindowsInstallDirectory() {
-  final appData = Platform.environment['LOCALAPPDATA'];
-  if (appData == null || appData.isEmpty) {
-    return p.join(homeDirectoryPath(), 'AppData', 'Local');
+String defaultWindowsInstallDirectory([Map<String, String>? environment]) {
+  final appData = (environment ?? Platform.environment)['LOCALAPPDATA'];
+  if (appData == null || appData.trim().isEmpty) {
+    return p.join(
+        homeDirectoryPath(environment, 'windows'), 'AppData', 'Local');
   }
-  return appData;
+  return appData.trim();
 }
 
 String defaultLinuxInstallDirectory() {
   return p.join(homeDirectoryPath(), '.local', 'share');
 }
+
+/// An XDG base directory: `$variable` when it is an absolute path (the spec
+/// says to ignore relative ones), else `~/<fallback>`.
+String xdgBaseDirectory(
+  String variable,
+  List<String> fallback, [
+  Map<String, String>? environment,
+]) {
+  final value = (environment ?? Platform.environment)[variable]?.trim();
+  if (value != null && value.isNotEmpty && p.isAbsolute(value)) return value;
+  return p.joinAll([homeDirectoryPath(environment, 'linux'), ...fallback]);
+}
+
+/// `$XDG_DATA_HOME`, by default `~/.local/share`.
+String linuxDataHome([Map<String, String>? environment]) =>
+    xdgBaseDirectory('XDG_DATA_HOME', ['.local', 'share'], environment);
 
 /// Extracts [archivePath] (.zip or .tar.gz) into [destinationDir].
 ///

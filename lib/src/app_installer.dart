@@ -99,51 +99,65 @@ class AppInstaller {
     return defaultLumideAppPath();
   }
 
+  /// Adds Lumide to the app menu: copies its .desktop file and icon into
+  /// the user's data folder ($XDG_DATA_HOME, by default ~/.local/share).
   Future<void> _integrateLinuxDesktop(String installDir) async {
-    final desktopFileSource = p.join(installDir, 'io.sofluffy.lumide.desktop');
-    if (!File(desktopFileSource).existsSync()) return;
+    // Current archives keep these under share/; older ones at the top.
+    final desktopFileSource = _firstExistingFile([
+      p.join(installDir, 'share', 'applications', '$kLinuxAppId.desktop'),
+      p.join(installDir, '$kLinuxAppId.desktop'),
+    ]);
+    if (desktopFileSource == null) return;
+    final iconSource = _firstExistingFile([
+      p.join(installDir, 'share', 'icons', 'hicolor', '512x512', 'apps',
+          '$kLinuxAppId.png'),
+      p.join(installDir, 'lumide.png'),
+    ]);
 
-    final applicationsDir = p.join(
-      homeDirectoryPath(),
-      '.local',
-      'share',
-      'applications',
-    );
-    await ensureDirectoryExists(applicationsDir);
-
-    final desktopFileDest = p.join(
-      applicationsDir,
-      'io.sofluffy.lumide.desktop',
-    );
-    final content = await File(desktopFileSource).readAsString();
-
-    // Patch paths in .desktop file
-    final patchedContent = content
-        .replaceAll(RegExp(r'Exec=.*'), 'Exec=$installDir/Lumide %U')
-        .replaceAll(RegExp(r'Icon=.*'), 'Icon=$installDir/lumide.png');
-
-    await File(desktopFileDest).writeAsString(patchedContent);
-
-    // Copy icon if exists
-    final iconSource = p.join(installDir, 'lumide.png');
-    if (File(iconSource).existsSync()) {
-      final iconDestDir = p.join(
-        homeDirectoryPath(),
-        '.local',
-        'share',
-        'icons',
-        'hicolor',
-        '512x512',
-        'apps',
-      );
+    final dataHome = linuxDataHome();
+    final iconThemeDir = p.join(dataHome, 'icons', 'hicolor');
+    if (iconSource != null) {
+      final iconDestDir = p.join(iconThemeDir, '512x512', 'apps');
       await ensureDirectoryExists(iconDestDir);
-      await File(
-        iconSource,
-      ).copy(p.join(iconDestDir, 'io.sofluffy.lumide.png'));
+      await File(iconSource).copy(p.join(iconDestDir, '$kLinuxAppId.png'));
     }
 
-    // Try to update desktop database
-    await Process.run('update-desktop-database', [applicationsDir]);
+    final applicationsDir = p.join(dataHome, 'applications');
+    await ensureDirectoryExists(applicationsDir);
+    final content = await File(desktopFileSource).readAsString();
+    await File(p.join(applicationsDir, '$kLinuxAppId.desktop')).writeAsString(
+      patchLinuxDesktopEntry(
+        content,
+        executable: p.join(installDir, 'Lumide'),
+        iconName: iconSource == null ? null : kLinuxAppId,
+      ),
+    );
+
+    // Refresh the caches if the tools are installed. Desktops also pick up
+    // the new files without them, so failures are ignored.
+    await _runIgnoringErrors('update-desktop-database', [applicationsDir]);
+    if (iconSource != null) {
+      await _runIgnoringErrors(
+          'gtk-update-icon-cache', ['-f', '-t', iconThemeDir]);
+    }
+  }
+
+  static String? _firstExistingFile(List<String> paths) {
+    for (final path in paths) {
+      if (File(path).existsSync()) return path;
+    }
+    return null;
+  }
+
+  static Future<void> _runIgnoringErrors(
+    String executable,
+    List<String> arguments,
+  ) async {
+    try {
+      await Process.run(executable, arguments);
+    } on ProcessException {
+      // Not installed.
+    }
   }
 
   Future<String> attachDiskImage(String dmgPath) async {
@@ -220,4 +234,37 @@ String defaultLumideAppPath() {
 
   // Linux structure from install.sh
   return p.join(homeDirectoryPath(), '.local', 'opt', 'lumide', 'Lumide');
+}
+
+/// [desktopEntry] with every `Exec=` line (including actions such as
+/// "New Window") running [executable], keeping each line's arguments, and
+/// `Icon=` set to [iconName] when given.
+String patchLinuxDesktopEntry(
+  String desktopEntry, {
+  required String executable,
+  String? iconName,
+}) {
+  var patched = desktopEntry.replaceAllMapped(
+    RegExp(r'^Exec=("(?:[^"\\]|\\.)*"|\S*)(.*)$', multiLine: true),
+    (match) => 'Exec=${quoteDesktopExecArgument(executable)}${match[2]}',
+  );
+  if (iconName != null) {
+    patched = patched.replaceAll(
+      RegExp(r'^Icon=.*$', multiLine: true),
+      'Icon=$iconName',
+    );
+  }
+  return patched;
+}
+
+/// [argument] quoted for an `Exec=` line, as the Desktop Entry spec
+/// requires (a literal backslash takes four, because the file's own string
+/// escaping applies first).
+String quoteDesktopExecArgument(String argument) {
+  final escaped = argument
+      .replaceAll(r'\', r'\\\\')
+      .replaceAll('"', r'\"')
+      .replaceAll('`', r'\`')
+      .replaceAll(r'$', r'\$');
+  return '"$escaped"';
 }
