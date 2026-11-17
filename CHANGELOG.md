@@ -1,16 +1,16 @@
-## Unreleased
-- Fix installs from the 0.25 archives landing in `Lumide/Lumide/`, so the CLI could not find the app it had just installed. Existing installs in that layout are still found.
-- Fix downloads freezing (nocterm 0.8) and running about 16x slower under the install screen on Windows (download and extraction now run on a background isolate).
-- Retry the release lookup and download on connection errors, resume interrupted downloads, and fail stalled connections instead of hanging.
+## 1.2.0
+- Install to a custom folder with `--install-dir`, which the CLI remembers, or point it at one with `LUMIDE_INSTALL_DIR`. A folder that already holds Lumide can be used without reinstalling.
+- `lumide doctor` and the upgrade question show the installed and the latest Lumide version.
+- `lumide doctor` checks the Dart that Lumide starts plugins with, `dart.exe` behind Flutter's `dart.bat` on Windows, and finds `flutter.bat`.
+- Downloads retry on connection errors, resume where they stopped, and no longer hang on a stalled connection or slow down under the install screen on Windows.
+- Upgrades keep the installed Lumide until the new one is in place.
 - Commands exit as soon as they are done instead of waiting for the update check.
 - `--silent` no longer replaces an existing installation unless `--force` is given.
-- Refuse archive entries that would extract outside the install folder.
-- Never replace an existing `Lumide` folder that is not a Lumide installation (it was deleted before), and refuse to install inside an installed Lumide.
-- Linux: add the app menu entry and icon from the current archive layout.
-- Add `LUMIDE_INSTALL_DIR`, and remember a custom `--install-dir` so `lumide`, `launch` and `doctor` find Lumide there. A folder that already holds Lumide can be used without reinstalling.
-- `lumide doctor` and the upgrade question show the installed and latest Lumide versions.
-- Fix the CLI reporting its own current version as an available update.
-- `lumide doctor` checks the Dart that Lumide starts plugins with: the `dart` on its PATH, and on Windows the `dart.exe` behind Flutter's `dart.bat`, instead of the one the CLI itself runs in. The Flutter check now finds `flutter.bat`.
+- Fix installs from the 0.25 archives landing in `Lumide/Lumide/`, where the CLI could not find them. Installs in that layout are still found.
+- Fix downloads freezing on Windows.
+- Fix the Linux menu entry and icon with the current archive layout.
+- Fix the CLI reporting its own version as an update.
+- Refuse archive entries that point outside the install folder, an existing `Lumide` folder that isn't Lumide, and folders inside an installed Lumide.
 
 ## 1.1.1
 - Add `-n` arg for macOS to open as new process.

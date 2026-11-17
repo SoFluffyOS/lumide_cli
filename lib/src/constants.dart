@@ -6,7 +6,7 @@ const String kLumideAppBundleName = 'Lumide.app';
 const String kGithubApiBaseUrl = 'https://api.github.com';
 
 /// Must match `version` in pubspec.yaml (checked by a test).
-const String kLumideCliVersion = '1.1.1';
+const String kLumideCliVersion = '1.2.0';
 
 /// Lumide's desktop file and icon name on Linux.
 const String kLinuxAppId = 'io.sofluffy.lumide';
