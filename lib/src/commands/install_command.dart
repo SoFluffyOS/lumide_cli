@@ -13,7 +13,6 @@ import 'package:lumide/src/constants.dart';
 import 'package:lumide/src/github_release_client.dart';
 import 'package:lumide/src/install_location_config.dart';
 import 'package:lumide/src/io_helpers.dart';
-import 'package:lumide/src/lumide_process_environment.dart';
 import 'package:lumide/src/network_retry.dart';
 import 'package:lumide/src/release_asset_selector.dart';
 import 'package:nocterm/nocterm.dart';
@@ -331,23 +330,12 @@ class InstallCommand extends Command<int> {
         final absoluteArgs = _resolveAbsoluteArgs(passthroughArguments);
         arguments.addAll(absoluteArgs);
       }
-      // Lets Lumide's plugins start `dart` when PATH only has Flutter's
-      // dart.bat.
-      final environment =
-          LumideProcessEnvironment.windowsLaunchEnvironment(appPath);
       await Process.start(
         appPath,
         arguments,
-        environment: environment,
         mode: ProcessStartMode.detached,
         runInShell: true,
       );
-      if (environment != null) {
-        _notes.add(
-          "Added Flutter's Dart SDK to Lumide's PATH so its plugins can "
-          'start `dart`.',
-        );
-      }
     } else {
       // Linux
       if (passthroughArguments.isNotEmpty) {

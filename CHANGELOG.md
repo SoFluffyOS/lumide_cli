@@ -10,8 +10,7 @@
 - Add `LUMIDE_INSTALL_DIR`, and remember a custom `--install-dir` so `lumide`, `launch` and `doctor` find Lumide there. A folder that already holds Lumide can be used without reinstalling.
 - `lumide doctor` and the upgrade question show the installed and latest Lumide versions.
 - Fix the CLI reporting its own current version as an available update.
-- `lumide doctor` on Windows: check the `dart.exe` that Lumide itself would start (a bare `dart` never runs Flutter's `dart.bat`) instead of reporting a false success when the CLI runs inside `dart.exe`, and say which folder to add to PATH. The Flutter check now finds `flutter.bat`.
-- Windows: when PATH only has Flutter's `dart.bat`, Lumide started by the CLI (`lumide`, `lumide launch`, after `lumide install`) gets Flutter's Dart SDK added to its PATH, so its plugins can start `dart`.
+- `lumide doctor` checks the Dart that Lumide starts plugins with: the `dart` on its PATH, and on Windows the `dart.exe` behind Flutter's `dart.bat`, instead of the one the CLI itself runs in. The Flutter check now finds `flutter.bat`.
 
 ## 1.1.1
 - Add `-n` arg for macOS to open as new process.

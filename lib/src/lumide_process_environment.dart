@@ -76,77 +76,24 @@ class LumideProcessEnvironment {
     return null;
   }
 
-  /// What a bare `dart` started by Lumide.exe gets on Windows.
-  ///
-  /// Windows (`CreateProcess`) starts a bare command name only as an
-  /// `.exe`, looking in the starting program's own folder ([appFolder])
-  /// before [pathEntries] (by default Lumide's PATH), so a `dart.bat`
-  /// (Flutter's wrapper in `flutter\bin`) is never run. [exe] is the
-  /// `dart.exe` found; when there is none, [batch] is the `dart.bat` or
-  /// `dart.cmd` on the PATH and [sdkBin] the folder of the `dart.exe`
-  /// behind it (Flutter keeps it in `bin\cache\dart-sdk\bin`), if present.
-  static ({String? exe, String? batch, String? sdkBin}) windowsDart({
-    String? appFolder,
-    List<String>? pathEntries,
+  /// The Dart that Lumide starts plugins with, for the [resolvedDart] its
+  /// PATH lookup found: on Windows, Flutter's `dart.bat` becomes the
+  /// `dart.exe` behind it in `bin\cache\dart-sdk\bin`, as Lumide's plugin
+  /// runner does. Anything else is used as is.
+  static String dartLaunchExecutable(
+    String resolvedDart, {
+    String? operatingSystem,
   }) {
-    if (appFolder != null) {
-      final bundled = p.join(appFolder, 'dart.exe');
-      if (File(bundled).existsSync()) {
-        return (exe: bundled, batch: null, sdkBin: null);
-      }
-    }
-    final directories = (pathEntries ?? path.split(';'))
-        .map((entry) => entry.trim())
-        .where((entry) => entry.isNotEmpty);
-    String? batch;
-    for (final directory in directories) {
-      final exe = p.join(directory, 'dart.exe');
-      if (File(exe).existsSync()) return (exe: exe, batch: null, sdkBin: null);
-      batch ??= [p.join(directory, 'dart.bat'), p.join(directory, 'dart.cmd')]
-          .where((candidate) => File(candidate).existsSync())
-          .firstOrNull;
-    }
-    if (batch == null) return (exe: null, batch: null, sdkBin: null);
-    final sdkBin = p.join(p.dirname(batch), 'cache', 'dart-sdk', 'bin');
-    return (
-      exe: null,
-      batch: batch,
-      sdkBin: File(p.join(sdkBin, 'dart.exe')).existsSync() ? sdkBin : null,
+    final os = operatingSystem ?? Platform.operatingSystem;
+    final isDartBatch = p.basename(resolvedDart).toLowerCase() == 'dart.bat';
+    if (os != 'windows' || !isDartBatch) return resolvedDart;
+    final sdkDart = p.join(
+      p.dirname(resolvedDart),
+      'cache',
+      'dart-sdk',
+      'bin',
+      'dart.exe',
     );
-  }
-
-  /// The environment change to start Lumide at [appPath] with on Windows,
-  /// or `null` to start it with the current environment unchanged.
-  ///
-  /// When Lumide would find no `dart.exe` ([windowsDart]) but PATH has
-  /// Flutter's `dart.bat`, the Flutter SDK's own `bin\cache\dart-sdk\bin`
-  /// is appended to Lumide's PATH, so its plugin loader can start `dart`.
-  /// Appended last, it changes nothing that already resolves; only that
-  /// Lumide process is affected.
-  static Map<String, String>? windowsLaunchEnvironment(String appPath) {
-    if (!Platform.isWindows) return null;
-    return launchEnvironmentWithDart(
-      Platform.environment,
-      appFolder: p.dirname(appPath),
-    );
-  }
-
-  /// [windowsLaunchEnvironment] for a given [environment].
-  static Map<String, String>? launchEnvironmentWithDart(
-    Map<String, String> environment, {
-    String? appFolder,
-  }) {
-    final key = environment.keys.firstWhere(
-      (name) => name.toLowerCase() == 'path',
-      orElse: () => 'Path',
-    );
-    final current = environment[key] ?? '';
-    final dart = windowsDart(
-      appFolder: appFolder,
-      pathEntries: current.split(';'),
-    );
-    final sdkBin = dart.sdkBin;
-    if (dart.exe != null || sdkBin == null) return null;
-    return {key: current.isEmpty ? sdkBin : '$current;$sdkBin'};
+    return File(sdkDart).existsSync() ? sdkDart : resolvedDart;
   }
 }

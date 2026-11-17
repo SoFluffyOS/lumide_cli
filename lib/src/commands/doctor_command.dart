@@ -103,30 +103,26 @@ class DoctorCommand extends Command<int> {
       );
     }
 
-    // This intentionally uses bare `dart`, matching LocalPluginLoader. On
-    // Windows a bare name only starts an .exe, and starting it from here
-    // would depend on this CLI's own folder (under `dart pub global run` it
-    // runs inside dart.exe), so check the dart.exe Lumide would get instead.
+    // Lumide looks up `dart` on its PATH and starts plugins with what it
+    // found; on Windows, Flutter's dart.bat goes through the dart.exe behind
+    // it. Running the resolved path also keeps this check independent of the
+    // dart.exe this CLI may itself run in.
     final environment = LumideProcessEnvironment.environment;
     final resolvedDart = await LumideProcessEnvironment.resolveExecutable(
       'dart',
     );
-    final windowsDart = Platform.isWindows
-        ? LumideProcessEnvironment.windowsDart(
-            appFolder: isLumideApp(appPath) ? p.dirname(appPath) : null,
-          )
-        : null;
-    final pluginDart = windowsDart == null ? 'dart' : windowsDart.exe;
-    if (pluginDart != null) {
+    if (resolvedDart == null) {
+      stdout.writeln('[✗] Dart SDK (plugin startup): dart not found in PATH.');
+      stdout.writeln('    Add the Dart SDK (or Flutter) bin folder to PATH, or '
+          "choose a Dart SDK in Lumide's settings.");
+    } else {
       await _checkDart(
         label: 'Dart SDK (plugin startup)',
-        executable: pluginDart,
+        executable: LumideProcessEnvironment.dartLaunchExecutable(resolvedDart),
         environment: environment,
-        resolvedExecutable: windowsDart == null ? resolvedDart : pluginDart,
+        resolvedExecutable: resolvedDart,
         verbose: verbose,
       );
-    } else {
-      _reportMissingWindowsDart(windowsDart!);
     }
 
     if (customDart != null && customDart.trim().isNotEmpty) {
@@ -144,23 +140,10 @@ class DoctorCommand extends Command<int> {
         resolvedExecutable: resolvedCustom,
         verbose: verbose,
       );
-      stdout.writeln(
-        '[!] Local plugin `pub get` uses bare `dart`; the custom SDK setting '
-        'is not used by that Lumide process.',
-      );
     }
 
     if (pluginPath != null && pluginPath.trim().isNotEmpty) {
-      // With only Flutter's dart.bat in PATH, probe with the dart.exe Lumide
-      // gets when the CLI starts it.
-      final sdkBin = windowsDart?.sdkBin;
-      final launchDart = sdkBin == null ? null : p.join(sdkBin, 'dart.exe');
-      await _checkPluginPubGet(
-        pluginPath.trim(),
-        environment,
-        pluginDart ?? launchDart,
-        viaLaunch: pluginDart == null && launchDart != null,
-      );
+      await _checkPluginPubGet(pluginPath.trim(), environment, resolvedDart);
     }
 
     // 4. Flutter SDK
@@ -239,60 +222,22 @@ class DoctorCommand extends Command<int> {
     }
   }
 
-  /// Explains why Lumide can't start a bare `dart` on Windows, and how to
-  /// fix it.
-  void _reportMissingWindowsDart(
-    ({String? exe, String? batch, String? sdkBin}) dart,
-  ) {
-    final batch = dart.batch;
-    if (batch == null) {
-      stdout.writeln('[✗] Dart SDK (plugin startup): dart.exe not found in '
-          'PATH.');
-      stdout.writeln('    Install the Dart SDK (or Flutter) and add the folder '
-          'that contains dart.exe to PATH.');
-      return;
-    }
-    final sdkBin = dart.sdkBin;
-    if (sdkBin == null) {
-      stdout.writeln('[✗] Dart SDK (plugin startup): only $batch is in PATH.');
-      stdout.writeln('    Lumide starts plugins with a bare `dart`, which '
-          'Windows only runs as dart.exe.');
-      stdout.writeln('    Fix: add the folder that contains dart.exe to PATH, '
-          'then restart Lumide.');
-      return;
-    }
-    // `lumide launch` adds sdkBin to Lumide's PATH (see
-    // LumideProcessEnvironment.windowsLaunchEnvironment).
-    stdout.writeln('[!] Dart SDK (plugin startup): only $batch is in PATH.');
-    stdout.writeln('    Lumide starts plugins with a bare `dart`, which '
-        'Windows only runs as dart.exe. When started with `lumide` or '
-        '`lumide launch`, Lumide gets $sdkBin added to its PATH, so plugins '
-        'work.');
-    stdout.writeln('    To start Lumide another way (Start menu, shortcut), '
-        'add $sdkBin to PATH (after ${p.dirname(batch)}).');
-  }
-
   Future<void> _checkPluginPubGet(
     String pluginPath,
     Map<String, String> environment,
-    String? dartExecutable, {
-    bool viaLaunch = false,
-  }) async {
+    String? dartExecutable,
+  ) async {
     final absolutePath = p.absolute(pluginPath);
     stdout.writeln('\nPlugin startup process probe:');
     stdout.writeln('    command: dart pub get');
     stdout.writeln('    working directory: $absolutePath');
-    if (viaLaunch) {
-      stdout.writeln('    dart: $dartExecutable (as Lumide gets it when '
-          'started with `lumide` or `lumide launch`)');
-    }
     if (!await Directory(absolutePath).exists()) {
       stdout.writeln('[✗] Plugin path does not exist or is not a directory.');
       return;
     }
     if (dartExecutable == null) {
-      stdout.writeln('[✗] Plugin process cannot start: no dart.exe in PATH '
-          '(see the Dart SDK check above).');
+      stdout.writeln('[✗] Plugin process cannot start: dart not found in '
+          'PATH (see the Dart SDK check above).');
       return;
     }
 
