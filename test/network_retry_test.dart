@@ -73,6 +73,11 @@ void main() {
     expect(isTransientNetworkError(const SocketException('x')), isTrue);
     expect(isTransientNetworkError(TimeoutException('x')), isTrue);
     expect(isTransientNetworkError(const HttpException('x')), isTrue);
+    expect(
+      isTransientNetworkError(
+          const RedirectException('Redirect limit exceeded', [])),
+      isFalse,
+    );
     expect(isTransientNetworkError(const FormatException('x')), isFalse);
     expect(isTransientNetworkError(Exception('x')), isFalse);
   });

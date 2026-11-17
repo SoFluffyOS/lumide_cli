@@ -19,11 +19,14 @@ const int kNetworkMaxAttempts = 4;
 const Duration kNetworkStallTimeout = Duration(seconds: 30);
 
 /// Connection-level failures (no answer, connection dropped, timed out) are
-/// worth retrying. Errors where the server did answer (e.g. HTTP 404) are not.
-bool isTransientNetworkError(Object error) =>
-    error is SocketException ||
-    error is TimeoutException ||
-    error is HttpException;
+/// worth retrying. Errors where the server did answer (e.g. HTTP 404) are not,
+/// and neither is a redirect loop or too many redirects ([RedirectException]),
+/// which a retry would only repeat.
+bool isTransientNetworkError(Object error) => switch (error) {
+      RedirectException() => false,
+      SocketException() || TimeoutException() || HttpException() => true,
+      _ => false,
+    };
 
 /// Runs [action] and retries it on transient network errors, waiting
 /// [initialDelay] before the second attempt and doubling the wait after that.
