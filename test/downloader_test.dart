@@ -97,6 +97,32 @@ void main() {
     expect(rangeHeaders.last, 'bytes=$half-');
   });
 
+  test('starts over when the part does not continue the file', () async {
+    destination.writeAsBytesSync(data.sublist(0, half));
+    behaviours = [
+      (r) async {
+        r.response
+          ..statusCode = HttpStatus.partialContent
+          ..headers.set(HttpHeaders.contentRangeHeader,
+              'bytes 0-${data.length - 1}/${data.length}')
+          ..contentLength = data.length
+          ..add(data);
+        await r.response.close();
+      },
+      full,
+    ];
+    await download();
+    expect(destination.readAsBytesSync(), data);
+    expect(rangeHeaders, ['bytes=$half-', null]);
+  });
+
+  test('reads where a Content-Range starts', () {
+    expect(contentRangeStart('bytes 100-199/200'), 100);
+    expect(contentRangeStart('bytes 0-9/*'), 0);
+    expect(contentRangeStart('bytes */200'), isNull);
+    expect(contentRangeStart(null), isNull);
+  });
+
   test('a stalled transfer fails with a timeout and keeps the part', () async {
     final stalled = Completer<void>();
     behaviours = [

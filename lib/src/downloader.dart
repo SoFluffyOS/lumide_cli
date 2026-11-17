@@ -35,15 +35,22 @@ Future<void> downloadWithResume(
     }
     final response = await request.close().timeout(stallTimeout);
 
-    if (response.statusCode == HttpStatus.requestedRangeNotSatisfiable) {
+    final isPartial = response.statusCode == HttpStatus.partialContent;
+    // A part that doesn't start where the file ends would corrupt it.
+    final continuesFile = isPartial &&
+        contentRangeStart(
+              response.headers.value(HttpHeaders.contentRangeHeader),
+            ) ==
+            alreadyDownloaded;
+    if (response.statusCode == HttpStatus.requestedRangeNotSatisfiable ||
+        (isPartial && !continuesFile)) {
       // The partial file cannot be continued: start over next attempt.
       await response.drain<void>();
-      await destination.delete();
+      if (destination.existsSync()) await destination.delete();
       throw const HttpException('Download could not be resumed.');
     }
 
-    final resumed = alreadyDownloaded > 0 &&
-        response.statusCode == HttpStatus.partialContent;
+    final resumed = alreadyDownloaded > 0 && continuesFile;
     if (response.statusCode != HttpStatus.ok && !resumed) {
       await response.drain<void>();
       throw ProcessException(
@@ -81,4 +88,12 @@ Future<void> downloadWithResume(
   } finally {
     client.close(force: true);
   }
+}
+
+/// The first byte of a `Content-Range: bytes <start>-<end>/<size>` header,
+/// or `null` when [header] is missing or not in that form.
+int? contentRangeStart(String? header) {
+  final match = RegExp(r'^bytes\s+(\d+)-\d+/(?:\d+|\*)$')
+      .firstMatch(header?.trim() ?? '');
+  return match == null ? null : int.tryParse(match[1]!);
 }
