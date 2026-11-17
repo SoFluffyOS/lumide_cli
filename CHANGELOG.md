@@ -1,4 +1,8 @@
 ## 1.2.0
+- Document `lumide app api web`, which opens the folders in one window.
+- Add `--add` to add folders to the Lumide window you used last: `lumide --add api web`.
+- Document opening `*.lumide-workspace` files: `lumide team.lumide-workspace`.
+- Show these in `lumide --help`.
 - Install to a custom folder with `--install-dir`, which the CLI remembers, or point it at one with `LUMIDE_INSTALL_DIR`. A folder that already holds Lumide can be used without reinstalling.
 - `lumide doctor` and the upgrade question show the installed and the latest Lumide version.
 - `lumide doctor` checks the Dart that Lumide starts plugins with, `dart.exe` behind Flutter's `dart.bat` on Windows, and finds `flutter.bat`.
