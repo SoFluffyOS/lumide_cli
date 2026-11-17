@@ -264,15 +264,13 @@ class InstallCommand extends Command<int> {
             p.basename(appBundlePath),
           );
 
-          final destinationDirectory = Directory(destination);
-          if (await destinationDirectory.exists()) {
-            await destinationDirectory.delete(recursive: true);
-          }
-
-          await runCheckedProcess(
-            'ditto',
-            [appBundlePath, destination],
-            failureMessage: 'Failed to copy Lumide into $installDirectory.',
+          await replaceDirectory(
+            destination,
+            (staging) => runCheckedProcess(
+              'ditto',
+              [appBundlePath, staging],
+              failureMessage: 'Failed to copy Lumide into $installDirectory.',
+            ),
           );
 
           onStatus('Finalizing installation...');

@@ -71,19 +71,19 @@ class AppInstaller {
     checkLumideInstallDirectory(installDirectory);
     final destDir = Directory(destination);
 
-    if (await destDir.exists()) {
-      if (!force) {
-        throw ProcessException(
-          'install',
-          [destination],
-          'Lumide is already installed at $destination. '
-              'Re-run with --force to replace it.',
-        );
-      }
-      await destDir.delete(recursive: true);
+    if (!force && await destDir.exists()) {
+      throw ProcessException(
+        'install',
+        [destination],
+        'Lumide is already installed at $destination. '
+            'Re-run with --force to replace it.',
+      );
     }
 
-    await extractArchiveInBackground(archivePath, destination);
+    await replaceDirectory(
+      destination,
+      (staging) => extractArchiveInBackground(archivePath, staging),
+    );
 
     if (Platform.isLinux) {
       await _integrateLinuxDesktop(destination);
@@ -194,6 +194,52 @@ String? parseMountPoint(String plistOutput) {
     dotAll: true,
   ).firstMatch(plistOutput);
   return match?.group(1);
+}
+
+/// Replaces the folder [target] with one that [fill] writes into a staging
+/// folder next to it. The current folder is only swapped out once [fill]
+/// succeeds, so a failed or interrupted install leaves it working; if the
+/// swap itself fails (e.g. Lumide is running on Windows), it is put back.
+Future<void> replaceDirectory(
+  String target,
+  Future<void> Function(String staging) fill,
+) async {
+  final staging = Directory('$target.new');
+  final previous = Directory('$target.old');
+  await _deleteIfExists(staging);
+  await _deleteIfExists(previous);
+
+  try {
+    await fill(staging.path);
+    await _swapDirectory(staging, Directory(target), previous);
+  } finally {
+    await _deleteIfExists(staging);
+  }
+  await _deleteIfExists(previous);
+}
+
+Future<void> _swapDirectory(
+  Directory replacement,
+  Directory target,
+  Directory backup,
+) async {
+  final hasTarget = await target.exists();
+  if (hasTarget) await target.rename(backup.path);
+  try {
+    await replacement.rename(target.path);
+  } catch (_) {
+    if (hasTarget) await backup.rename(target.path);
+    rethrow;
+  }
+}
+
+/// Best effort: a leftover folder must not fail the install.
+Future<void> _deleteIfExists(Directory directory) async {
+  try {
+    if (await directory.exists()) await directory.delete(recursive: true);
+  } on FileSystemException {
+    // Still in use; the next install tries again.
+  }
 }
 
 /// The install directory set through [kLumideInstallDirEnvVar], or `null`.
