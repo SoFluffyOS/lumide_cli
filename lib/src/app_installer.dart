@@ -375,9 +375,9 @@ bool installReplaces(
 }
 
 /// The Lumide program running from [lumideInstallTarget] of
-/// [installDirectory], or `null`. Installing replaces that folder, so it
-/// must not run meanwhile: on Windows the swap fails, and on macOS and Linux
-/// it succeeds and then deletes files the running app still loads.
+/// [installDirectory], or `null`. Installing replaces that folder: on
+/// Windows the swap fails while it runs, and on macOS and Linux it succeeds
+/// but the running app loads the new version's files until it restarts.
 ///
 /// - Windows: a running program's .exe cannot be opened for writing
 ///   (ERROR_SHARING_VIOLATION).

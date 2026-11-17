@@ -90,12 +90,12 @@ class InstallCommand extends Command<int> {
         );
         return 1;
       }
-      // Nor can anyone close a running Lumide, so stop before downloading.
-      final running = runningLumideApp(installDirectory);
+      // Nor can anyone close a running Lumide, which Windows can't replace,
+      // so stop before downloading.
+      final running =
+          Platform.isWindows ? runningLumideApp(installDirectory) : null;
       if (running != null) {
-        stdout.writeln(
-          'Lumide is running from $running. Close it and try again.',
-        );
+        stdout.writeln(_closeLumideFirst(running));
         return 1;
       }
       await _performInstall(
@@ -106,15 +106,15 @@ class InstallCommand extends Command<int> {
         onProgress: (p) =>
             stdout.write('\rInstalling... ${(p * 100).toInt()}%'),
         onStatus: (s) => stdout.writeln('\n$s'),
-        // Yes to everything (e.g. launch afterwards). A Lumide started since
-        // the check above can't be waited for, so that fails the install.
+        // Yes to everything (e.g. launch afterwards). A Lumide started on
+        // Windows since the check above can't be waited for, so that fails
+        // the install.
         askConfirmation: (mode, [_]) async {
           if (mode == _PromptMode.confirmLumideClosed) {
             throw ProcessException(
               'install',
               [installDirectory],
-              'Lumide is running from '
-                  '${runningLumideApp(installDirectory)}. Close it and try '
+              'Lumide started running during the install. Close it and try '
                   'again.',
             );
           }
@@ -162,34 +162,58 @@ class InstallCommand extends Command<int> {
         .firstOrNull;
   }
 
-  /// A running Lumide must not be replaced (see [runningLumideApp]), so ask
-  /// the user to close it before downloading, and check again until it is
-  /// closed. The CLI never closes Lumide itself: that could lose unsaved
-  /// work.
+  /// Asks what to do about a Lumide running from the folder the install
+  /// replaces (see [runningLumideApp]), before downloading. The CLI never
+  /// closes Lumide itself: that could lose unsaved work.
+  ///
+  /// - Windows can't replace it, so the user closes it first; the check
+  ///   repeats until it is closed.
+  /// - macOS and Linux can, so the user may install anyway and restart
+  ///   Lumide afterwards. That also works from Lumide's own terminal, which
+  ///   closing Lumide would end.
   ///
   /// Returns false when the user chose No: the install is cancelled, like
   /// declining the other questions, not failed.
-  Future<bool> _waitUntilLumideIsClosed(
+  Future<bool> _confirmRunningLumide(
     String installDirectory,
     _AskConfirmation askConfirmation,
   ) async {
+    if (!Platform.isWindows) {
+      final running = runningLumideApp(installDirectory);
+      if (running == null) return true;
+      final installAnyway = await askConfirmation(
+        _PromptMode.confirmInstallWhileRunning,
+        'Lumide is running from $running. Install anyway, then restart it?',
+      );
+      if (!installAnyway) {
+        _notes.add('Installation cancelled: Lumide is running from $running.');
+        return false;
+      }
+      _notes.add('Restart Lumide to use the new version.');
+      return true;
+    }
+
     for (var running = runningLumideApp(installDirectory);
         running != null;
         running = runningLumideApp(installDirectory)) {
       final closed = await askConfirmation(
         _PromptMode.confirmLumideClosed,
-        'Lumide is running from $running. Close it, then continue?',
+        'Lumide is running from $running. Close it, then continue? If this '
+        'terminal is in Lumide, use another one.',
       );
       if (!closed) {
-        _notes.add(
-          'Installation cancelled: Lumide is still running from $running. '
-          'Close it and run the command again.',
-        );
+        _notes.add('Installation cancelled. ${_closeLumideFirst(running)}');
         return false;
       }
     }
     return true;
   }
+
+  /// What to do when Windows can't replace the Lumide running from
+  /// [running].
+  static String _closeLumideFirst(String running) =>
+      'Lumide is running from $running. Close it, then run `lumide install` '
+      'from a terminal outside Lumide.';
 
   /// Remembers [installDirectory] so `lumide`, `launch` and `doctor` find the
   /// app later, and says so. Installing back into the platform default
@@ -277,7 +301,7 @@ class InstallCommand extends Command<int> {
 
     // Before downloading: refuse folders the install would damage.
     checkLumideInstallDirectory(installDirectory);
-    if (!await _waitUntilLumideIsClosed(installDirectory, askConfirmation)) {
+    if (!await _confirmRunningLumide(installDirectory, askConfirmation)) {
       return;
     }
 
@@ -497,6 +521,7 @@ enum _PromptMode {
   confirmUpgrade,
   confirmUseExisting,
   confirmLumideClosed,
+  confirmInstallWhileRunning,
   confirmLaunch,
 }
 
@@ -756,12 +781,15 @@ class _InstallTuiState extends State<_InstallTui> {
                   'Use the Lumide already in this folder from now on?',
                 _PromptMode.confirmLumideClosed =>
                   'Lumide is running. Close it, then continue?',
+                _PromptMode.confirmInstallWhileRunning =>
+                  'Lumide is running. Install anyway, then restart it?',
                 _PromptMode.confirmLaunch => 'Success! Launch Lumide now?',
                 _ => '',
               };
           // A running Lumide blocks the install: show it as a warning, in
           // yellow, as the banner and buttons already use red.
-          final isWarning = _currentPrompt == _PromptMode.confirmLumideClosed;
+          final isWarning = _currentPrompt == _PromptMode.confirmLumideClosed ||
+              _currentPrompt == _PromptMode.confirmInstallWhileRunning;
 
           content = Column(
             mainAxisSize: MainAxisSize.min,

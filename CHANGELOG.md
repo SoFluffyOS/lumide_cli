@@ -4,6 +4,7 @@
 - `lumide doctor` checks the Dart that Lumide starts plugins with, `dart.exe` behind Flutter's `dart.bat` on Windows, and finds `flutter.bat`.
 - Downloads retry on connection errors, resume where they stopped, and no longer hang on a stalled connection or slow down under the install screen on Windows.
 - Upgrades keep the installed Lumide until the new one is in place.
+- `install` notices a running Lumide before downloading: on Windows it asks you to close it, on macOS and Linux it asks whether to install anyway and restart.
 - Commands exit as soon as they are done instead of waiting for the update check.
 - `--silent` no longer replaces an existing installation unless `--force` is given.
 - Fix installs from the 0.25 archives landing in `Lumide/Lumide/`, where the CLI could not find them. Installs in that layout are still found.

@@ -78,6 +78,11 @@ void main() {
     if (!Platform.isWindows) {
       await Process.run('chmod', ['+x', app]);
     }
+    if (Platform.isMacOS) {
+      // macOS kills a copied system binary on launch; an ad-hoc signature
+      // lets the copy run.
+      await Process.run('codesign', ['--force', '-s', '-', app]);
+    }
     expect(runningLumideApp(installDirectory), isNull);
 
     final process = await Process.start(app, arguments);
