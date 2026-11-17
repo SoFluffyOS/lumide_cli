@@ -163,10 +163,10 @@ void main() {
     test('Linux: a folder named Lumide is not mistaken for the app', () {
       // <dir>/Lumide is a folder here; the binary is inside it.
       createFile(['Lumide', 'Lumide']);
-      // p.equals: on Windows (case-insensitive) the first candidate,
-      // <dir>/lumide/Lumide, is this same file.
-      expect(p.equals(find('linux'), p.join(temp.path, 'Lumide', 'Lumide')),
-          isTrue);
+      // Compared without case: on file systems that ignore it (Windows,
+      // macOS) the first candidate, <dir>/lumide/Lumide, is this same file.
+      expect(find('linux').toLowerCase(),
+          p.join(temp.path, 'Lumide', 'Lumide').toLowerCase());
     });
 
     test('macOS: the bundle is a folder', () {
