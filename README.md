@@ -56,9 +56,68 @@ lumide install --silent
 
 ## Options
 
-- `-s, --silent`: Skip the terminal UI for automated installs.
+- `-s, --silent`: Skip the terminal UI for automated installs. An existing
+  installation is only replaced together with `--force`; otherwise the command
+  stops with exit code 1.
 - `--install-dir`: Specify a custom installation location.
 - `--force`: Force a fresh installation over an existing one.
+
+### Custom install location
+
+By default Lumide lives in `%LOCALAPPDATA%\Lumide` on Windows,
+`/Applications` on macOS and `~/.local/opt/lumide` on Linux. To keep it
+somewhere else, install it there once:
+
+```bash
+lumide install --install-dir D:\Tools    # Lumide in D:\Tools\Lumide\Lumide.exe
+```
+
+The CLI remembers the folder, so `lumide`, `lumide launch`, `lumide doctor`
+and later `lumide install` runs use it automatically. Installing again into
+the default location forgets it. The setting is stored in
+`%LOCALAPPDATA%\lumide-cli\config.json` (Windows),
+`~/Library/Application Support/lumide-cli/config.json` (macOS) or
+`$XDG_CONFIG_HOME/lumide-cli/config.json` (Linux, default `~/.config`).
+
+Already have Lumide in that folder (for example one you unzipped yourself)?
+Run the same command and answer **No** to the upgrade question: the CLI
+then offers to use that copy from now on, without downloading anything.
+
+You can also set `LUMIDE_INSTALL_DIR`, for example for CI or a shared setup.
+It takes priority over the remembered folder:
+
+```bash
+# Windows (PowerShell)
+setx LUMIDE_INSTALL_DIR "D:\Tools"
+
+# macOS / Linux
+export LUMIDE_INSTALL_DIR="$HOME/Apps"
+```
+
+Order of precedence: `--install-dir` (install only), then
+`LUMIDE_INSTALL_DIR`, then the remembered folder, then the default.
+`lumide doctor` shows which one is in use.
+
+On Windows and Linux the folder can also be the app's own folder, so a
+release archive you unzipped yourself works too. The CLI checks these
+places in order (a fixed list, not a search) and uses the first that
+exists; the second is the layout older CLI versions created:
+
+| Platform | Checked, in order                                                                       |
+| -------- | --------------------------------------------------------------------------------------- |
+| Windows  | `<dir>\Lumide\Lumide.exe`, `<dir>\Lumide\Lumide\Lumide.exe`, `<dir>\Lumide.exe`          |
+| macOS    | `<dir>/Lumide.app` (for the default folder, also `~/Applications/Lumide.app`)           |
+| Linux    | `<dir>/lumide/Lumide`, `<dir>/lumide/Lumide/Lumide`, `<dir>/Lumide`, `<dir>/Lumide/Lumide` |
+
+If none exists, `lumide doctor` lists every path it checked. A copy found
+outside the folder `lumide install` manages (e.g. `<dir>\Lumide.exe`) is
+never replaced; installing then adds a separate copy, after asking.
+
+Pointing at an installed Lumide's own folder (`D:\Tools\Lumide`) means the
+same as its install folder (`D:\Tools`). To protect your files,
+`lumide install` refuses a folder inside an installed Lumide (upgrades
+replace that whole folder), and never replaces an existing `Lumide` folder
+that isn't a Lumide installation.
 
 ### Plugin startup diagnostics
 

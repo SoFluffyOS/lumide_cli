@@ -75,4 +75,25 @@ class LumideProcessEnvironment {
     }
     return null;
   }
+
+  /// The Dart that Lumide starts plugins with, for the [resolvedDart] its
+  /// PATH lookup found: on Windows, Flutter's `dart.bat` becomes the
+  /// `dart.exe` behind it in `bin\cache\dart-sdk\bin`, as Lumide's plugin
+  /// runner does. Anything else is used as is.
+  static String dartLaunchExecutable(
+    String resolvedDart, {
+    String? operatingSystem,
+  }) {
+    final os = operatingSystem ?? Platform.operatingSystem;
+    final isDartBatch = p.basename(resolvedDart).toLowerCase() == 'dart.bat';
+    if (os != 'windows' || !isDartBatch) return resolvedDart;
+    final sdkDart = p.join(
+      p.dirname(resolvedDart),
+      'cache',
+      'dart-sdk',
+      'bin',
+      'dart.exe',
+    );
+    return File(sdkDart).existsSync() ? sdkDart : resolvedDart;
+  }
 }

@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:lumide/src/app_installer.dart';
+import 'package:lumide/src/app_version.dart';
 import 'package:lumide/src/commands/doctor_command.dart';
 import 'package:lumide/src/commands/fox_command.dart';
 import 'package:lumide/src/commands/install_command.dart';
@@ -27,9 +28,7 @@ Future<int> runLumide(List<String> arguments) async {
 
   var effectiveArguments = arguments;
   if (effectiveArguments.isEmpty) {
-    final appPath = defaultLumideAppPath();
-    final entity = FileSystemEntity.typeSync(appPath);
-    if (entity == FileSystemEntityType.notFound) {
+    if (!isLumideApp(defaultLumideAppPath())) {
       effectiveArguments = ['install', '--prompt'];
     } else {
       effectiveArguments = ['launch'];
@@ -45,9 +44,7 @@ Future<int> runLumide(List<String> arguments) async {
 
   // Redirect to install if Lumide is missing during a launch attempt
   if (effectiveArguments.isNotEmpty && effectiveArguments.first == 'launch') {
-    final appPath = defaultLumideAppPath();
-    final entity = FileSystemEntity.typeSync(appPath);
-    if (entity == FileSystemEntityType.notFound) {
+    if (!isLumideApp(defaultLumideAppPath())) {
       final remainingArgs = effectiveArguments.skip(1).toList();
       effectiveArguments = ['install', '--prompt', ...remainingArgs];
     }
@@ -61,7 +58,7 @@ Future<int> runLumide(List<String> arguments) async {
       final latestVersion = await updateCheck.timeout(
         const Duration(milliseconds: 500),
       );
-      if (latestVersion != null && !latestVersion.contains(kLumideCliVersion)) {
+      if (isUpToDate(kLumideCliVersion, latestVersion) == false) {
         stdout.writeln(
           '\n[!] A new version of Lumide CLI is available: $latestVersion\n'
           '    Run `dart pub global activate lumide` to update.',

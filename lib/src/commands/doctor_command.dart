@@ -2,7 +2,10 @@ import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:lumide/src/app_installer.dart';
+import 'package:lumide/src/app_version.dart';
 import 'package:lumide/src/constants.dart';
+import 'package:lumide/src/github_release_client.dart';
+import 'package:lumide/src/install_location_config.dart';
 import 'package:lumide/src/lumide_process_environment.dart';
 import 'package:lumide/src/pub_client.dart';
 import 'package:path/path.dart' as p;
@@ -47,7 +50,14 @@ class DoctorCommand extends Command<int> {
     final pluginPath = argResults?['plugin-path'] as String?;
 
     stdout.writeln('Checking Lumide environment...\n');
+    // Runs alongside the other checks; one attempt, so doctor never stalls.
+    final latestAppRelease = const GithubReleaseClient()
+        .fetchLatestRelease(repository: kDefaultGithubRepo, maxAttempts: 1)
+        .then<String?>((release) => release.tagName)
+        .catchError((Object _) => null);
     await LumideProcessEnvironment.initialize();
+    // Started now too: `flutter --version` takes a few seconds.
+    final flutterLine = _flutterLine(LumideProcessEnvironment.environment);
 
     // 1. CLI Version
     stdout.write('[✓] Lumide CLI: $kLumideCliVersion');
@@ -56,10 +66,10 @@ class DoctorCommand extends Command<int> {
       final latestVersion = await client.fetchLatestVersion();
       if (latestVersion == null) {
         stdout.writeln(' (Unable to check for updates)');
-      } else if (latestVersion.contains(kLumideCliVersion)) {
-        stdout.writeln(' (Up to date)');
-      } else {
+      } else if (isUpToDate(kLumideCliVersion, latestVersion) == false) {
         stdout.writeln(' (New version available: $latestVersion)');
+      } else {
+        stdout.writeln(' (Up to date)');
       }
     } catch (_) {
       stdout.writeln(' (Unable to check for updates)');
@@ -67,27 +77,53 @@ class DoctorCommand extends Command<int> {
 
     // 2. Lumide App
     final appPath = defaultLumideAppPath();
-    final entity = FileSystemEntity.typeSync(appPath);
-    if (entity != FileSystemEntityType.notFound) {
-      stdout.writeln('[✓] Lumide App: Installed at $appPath');
+    final source = lumideInstallDirectoryOverride() != null
+        ? ' (from $kLumideInstallDirEnvVar)'
+        : savedLumideInstallDirectory() != null
+            ? ' (saved by `lumide install --install-dir`)'
+            : '';
+    if (isLumideApp(appPath)) {
+      stdout.writeln('[✓] Lumide App: Installed at $appPath$source');
+      final installed = installedLumideVersion(appPath);
+      final latest = await latestAppRelease;
+      final hint = isUpToDate(installed, latest) == false
+          ? ' (run `lumide install` to update)'
+          : '';
+      stdout
+          .writeln('    Version: ${describeVersions(installed, latest)}$hint');
     } else {
+      stdout.writeln('[✗] Lumide App: Not found$source. Looked in:');
+      for (final path in lumideAppSearchPaths()) {
+        stdout.writeln('      $path');
+      }
       stdout.writeln(
-        '[✗] Lumide App: Not found. Run `lumide install` to set it up.',
+        '    Run `lumide install` to set it up, or set '
+        '$kLumideInstallDirEnvVar to the folder that contains your Lumide '
+        'installation.',
       );
     }
 
-    // This intentionally uses bare `dart`, matching LocalPluginLoader.
+    // Lumide looks up `dart` on its PATH and starts plugins with what it
+    // found; on Windows, Flutter's dart.bat goes through the dart.exe behind
+    // it. Running the resolved path also keeps this check independent of the
+    // dart.exe this CLI may itself run in.
     final environment = LumideProcessEnvironment.environment;
     final resolvedDart = await LumideProcessEnvironment.resolveExecutable(
       'dart',
     );
-    await _checkDart(
-      label: 'Dart SDK (plugin startup)',
-      executable: 'dart',
-      environment: environment,
-      resolvedExecutable: resolvedDart,
-      verbose: verbose,
-    );
+    if (resolvedDart == null) {
+      stdout.writeln('[✗] Dart SDK (plugin startup): dart not found in PATH.');
+      stdout.writeln('    Add the Dart SDK (or Flutter) bin folder to PATH, or '
+          "choose a Dart SDK in Lumide's settings.");
+    } else {
+      await _checkDart(
+        label: 'Dart SDK (plugin startup)',
+        executable: LumideProcessEnvironment.dartLaunchExecutable(resolvedDart),
+        environment: environment,
+        resolvedExecutable: resolvedDart,
+        verbose: verbose,
+      );
+    }
 
     if (customDart != null && customDart.trim().isNotEmpty) {
       final command = customDart.trim().split(RegExp(r'\s+'));
@@ -104,34 +140,14 @@ class DoctorCommand extends Command<int> {
         resolvedExecutable: resolvedCustom,
         verbose: verbose,
       );
-      stdout.writeln(
-        '[!] Local plugin `pub get` uses bare `dart`; the custom SDK setting '
-        'is not used by that Lumide process.',
-      );
     }
 
     if (pluginPath != null && pluginPath.trim().isNotEmpty) {
-      await _checkPluginPubGet(pluginPath.trim(), environment);
+      await _checkPluginPubGet(pluginPath.trim(), environment, resolvedDart);
     }
 
     // 4. Flutter SDK
-    try {
-      final result = await Process.run(
-        'flutter',
-        ['--version'],
-        environment: environment,
-      );
-      if (result.exitCode == 0) {
-        final firstLine = result.stdout.toString().split('\n').first;
-        stdout.writeln('[✓] Flutter SDK: ${firstLine.split(' ').elementAt(1)}');
-      } else {
-        stdout.writeln('[!] Flutter SDK: Found but check failed.');
-      }
-    } catch (_) {
-      stdout.writeln(
-        '[!] Flutter SDK: Not found in PATH (optional for Lumide).',
-      );
-    }
+    stdout.writeln(await flutterLine);
 
     if (verbose || showPath) {
       _printProcessDetails(
@@ -186,9 +202,30 @@ class DoctorCommand extends Command<int> {
     }
   }
 
+  /// The Flutter SDK line of the report. On Windows `flutter` is
+  /// flutter.bat, which only starts through the shell.
+  Future<String> _flutterLine(Map<String, String> environment) async {
+    try {
+      final result = await Process.run(
+        'flutter',
+        ['--version'],
+        environment: environment,
+        runInShell: Platform.isWindows,
+      );
+      if (result.exitCode == 0) {
+        final firstLine = result.stdout.toString().split('\n').first;
+        return '[✓] Flutter SDK: ${firstLine.split(' ').elementAt(1)}';
+      }
+      return '[!] Flutter SDK: Found but check failed.';
+    } catch (_) {
+      return '[!] Flutter SDK: Not found in PATH (optional for Lumide).';
+    }
+  }
+
   Future<void> _checkPluginPubGet(
     String pluginPath,
     Map<String, String> environment,
+    String? dartExecutable,
   ) async {
     final absolutePath = p.absolute(pluginPath);
     stdout.writeln('\nPlugin startup process probe:');
@@ -198,10 +235,15 @@ class DoctorCommand extends Command<int> {
       stdout.writeln('[✗] Plugin path does not exist or is not a directory.');
       return;
     }
+    if (dartExecutable == null) {
+      stdout.writeln('[✗] Plugin process cannot start: dart not found in '
+          'PATH (see the Dart SDK check above).');
+      return;
+    }
 
     try {
       final result = await Process.run(
-        'dart',
+        dartExecutable,
         ['pub', 'get'],
         workingDirectory: absolutePath,
         environment: environment,

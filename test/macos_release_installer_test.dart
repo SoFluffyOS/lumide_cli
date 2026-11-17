@@ -1,4 +1,4 @@
-import 'package:lumide/src/macos_release_installer.dart';
+import 'package:lumide/src/app_installer.dart';
 import 'package:test/test.dart';
 
 void main() {
