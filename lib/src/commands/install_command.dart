@@ -90,6 +90,14 @@ class InstallCommand extends Command<int> {
         );
         return 1;
       }
+      // Nor can anyone close a running Lumide, so stop before downloading.
+      final running = runningLumideApp(installDirectory);
+      if (running != null) {
+        stdout.writeln(
+          'Lumide is running from $running. Close it and try again.',
+        );
+        return 1;
+      }
       await _performInstall(
         installDirectory: installDirectory,
         repo: repo,
@@ -98,7 +106,20 @@ class InstallCommand extends Command<int> {
         onProgress: (p) =>
             stdout.write('\rInstalling... ${(p * 100).toInt()}%'),
         onStatus: (s) => stdout.writeln('\n$s'),
-        askConfirmation: (_, [__]) async => true, // e.g. launch afterwards
+        // Yes to everything (e.g. launch afterwards). A Lumide started since
+        // the check above can't be waited for, so that fails the install.
+        askConfirmation: (mode, [_]) async {
+          if (mode == _PromptMode.confirmLumideClosed) {
+            throw ProcessException(
+              'install',
+              [installDirectory],
+              'Lumide is running from '
+                  '${runningLumideApp(installDirectory)}. Close it and try '
+                  'again.',
+            );
+          }
+          return true;
+        },
         passthroughArguments: passthroughArgs,
       );
       stdout.writeln();
@@ -139,6 +160,35 @@ class InstallCommand extends Command<int> {
     return lumideAppSearchPathsFor(installDirectory)
         .where(isLumideApp)
         .firstOrNull;
+  }
+
+  /// A running Lumide must not be replaced (see [runningLumideApp]), so ask
+  /// the user to close it before downloading, and check again until it is
+  /// closed. The CLI never closes Lumide itself: that could lose unsaved
+  /// work.
+  ///
+  /// Returns false when the user chose No: the install is cancelled, like
+  /// declining the other questions, not failed.
+  Future<bool> _waitUntilLumideIsClosed(
+    String installDirectory,
+    _AskConfirmation askConfirmation,
+  ) async {
+    for (var running = runningLumideApp(installDirectory);
+        running != null;
+        running = runningLumideApp(installDirectory)) {
+      final closed = await askConfirmation(
+        _PromptMode.confirmLumideClosed,
+        'Lumide is running from $running. Close it, then continue?',
+      );
+      if (!closed) {
+        _notes.add(
+          'Installation cancelled: Lumide is still running from $running. '
+          'Close it and run the command again.',
+        );
+        return false;
+      }
+    }
+    return true;
   }
 
   /// Remembers [installDirectory] so `lumide`, `launch` and `doctor` find the
@@ -227,6 +277,9 @@ class InstallCommand extends Command<int> {
 
     // Before downloading: refuse folders the install would damage.
     checkLumideInstallDirectory(installDirectory);
+    if (!await _waitUntilLumideIsClosed(installDirectory, askConfirmation)) {
+      return;
+    }
 
     onStatus('Resolving latest release...');
     onProgress(0.02);
@@ -443,6 +496,7 @@ enum _PromptMode {
   confirmInstall,
   confirmUpgrade,
   confirmUseExisting,
+  confirmLumideClosed,
   confirmLaunch,
 }
 
@@ -700,9 +754,14 @@ class _InstallTuiState extends State<_InstallTui> {
                   'Lumide is already installed. Upgrade?',
                 _PromptMode.confirmUseExisting =>
                   'Use the Lumide already in this folder from now on?',
+                _PromptMode.confirmLumideClosed =>
+                  'Lumide is running. Close it, then continue?',
                 _PromptMode.confirmLaunch => 'Success! Launch Lumide now?',
                 _ => '',
               };
+          // A running Lumide blocks the install: show it as a warning, in
+          // yellow, as the banner and buttons already use red.
+          final isWarning = _currentPrompt == _PromptMode.confirmLumideClosed;
 
           content = Column(
             mainAxisSize: MainAxisSize.min,
@@ -710,9 +769,9 @@ class _InstallTuiState extends State<_InstallTui> {
               Text(banner, style: TextStyle(color: bannerColor)),
               SizedBox(height: isShortHeight ? 1 : 2),
               Text(
-                question,
-                style: const TextStyle(
-                  color: Colors.brightWhite,
+                isWarning ? 'Warning: $question' : question,
+                style: TextStyle(
+                  color: isWarning ? Colors.yellow : Colors.brightWhite,
                   fontWeight: FontWeight.bold,
                 ),
               ),

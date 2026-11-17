@@ -374,6 +374,93 @@ bool installReplaces(
   return p.equals(target, appPath) || p.isWithin(target, appPath);
 }
 
+/// The Lumide program running from [lumideInstallTarget] of
+/// [installDirectory], or `null`. Installing replaces that folder, so it
+/// must not run meanwhile: on Windows the swap fails, and on macOS and Linux
+/// it succeeds and then deletes files the running app still loads.
+///
+/// - Windows: a running program's .exe cannot be opened for writing
+///   (ERROR_SHARING_VIOLATION).
+/// - Linux: the `/proc/<pid>/exe` link of every process.
+/// - macOS: the executable path of every process, from `ps -axo comm=`.
+String? runningLumideApp(String installDirectory) {
+  final target = lumideInstallTarget(installDirectory);
+  return switch (Platform.operatingSystem) {
+    'windows' => _runningWindowsApp(installDirectory),
+    'linux' => firstExecutableInside(target, _linuxProcessExecutables()),
+    'macos' => firstExecutableInside(target, _macOsProcessExecutables()),
+    _ => null,
+  };
+}
+
+/// The first of [executables] that lies inside [folder], or `null`. Both
+/// the folder as given and its real path count, since processes report
+/// either (macOS `ps` shows the path a program was started with, Linux
+/// `/proc` the real one).
+String? firstExecutableInside(String folder, Iterable<String> executables) {
+  if (!Directory(folder).existsSync()) return null;
+  final roots = {
+    p.normalize(p.absolute(folder)),
+    Directory(folder).resolveSymbolicLinksSync(),
+  };
+  for (final executable in executables) {
+    if (roots.any((root) => p.isWithin(root, executable))) return executable;
+  }
+  return null;
+}
+
+String? _runningWindowsApp(String installDirectory) {
+  const sharingViolation = 32;
+  final apps = lumideAppCandidatesForInstallDirectory(installDirectory)
+      .where((path) => installReplaces(installDirectory, path));
+  for (final path in apps) {
+    if (!File(path).existsSync()) continue;
+    try {
+      File(path).openSync(mode: FileMode.append).closeSync();
+    } on FileSystemException catch (error) {
+      if (error.osError?.errorCode == sharingViolation) return path;
+    }
+  }
+  return null;
+}
+
+/// The executables of the running processes this user can see.
+Iterable<String> _linuxProcessExecutables() sync* {
+  final List<FileSystemEntity> entries;
+  try {
+    entries = Directory('/proc').listSync();
+  } on FileSystemException {
+    return;
+  }
+  for (final entry in entries) {
+    if (int.tryParse(p.basename(entry.path)) == null) continue;
+    try {
+      // A replaced or deleted executable reads as "<path> (deleted)".
+      final target = Link(p.join(entry.path, 'exe')).targetSync();
+      yield target.endsWith(' (deleted)')
+          ? target.substring(0, target.length - ' (deleted)'.length)
+          : target;
+    } on FileSystemException {
+      // Another user's process, or one that has just ended.
+    }
+  }
+}
+
+/// The executable paths of the running processes.
+List<String> _macOsProcessExecutables() {
+  try {
+    final result = Process.runSync('ps', ['-axo', 'comm=']);
+    if (result.exitCode != 0) return const [];
+    return (result.stdout as String)
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.startsWith('/'))
+        .toList();
+  } on ProcessException {
+    return const [];
+  }
+}
+
 /// Whether [lumideInstallTarget] of [installDirectory] holds an installed
 /// Lumide (in either layout), so `lumide install` may replace it.
 bool hasManagedLumideInstall(
